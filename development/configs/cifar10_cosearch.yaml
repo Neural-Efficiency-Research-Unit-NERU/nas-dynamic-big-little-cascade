@@ -1,0 +1,71 @@
+search:
+  algorithm: nsga2
+  population_size: 20
+  n_generations: 20
+  proxy_epochs: 5
+  proxy_lr: 0.05
+  proxy_batch_size: 128
+  feasible_sampling_attempts_factor: 500
+
+  # Hard constraint: deployment memory budget (450 KiB).
+  memory_budget_bytes: 460800
+  # Hard lower bound so NSGA-II does not fill the front with undersized pairs
+  # that are cheap but not meaningful embedded classifiers.
+  min_params: 50000
+  # Role-level lower bounds keep the pair from satisfying the combined budget
+  # with one nearly-toy model and one reasonable model.
+  little_min_params: 15000
+  little_max_params: 30000
+  big_min_params: 40000
+  big_max_params: 85000
+  # Hard parameter cap for the final embedded model pair.
+  max_params: 100000
+  # Keep the "big" path structurally larger than the "little" path.
+  require_big_more_blocks: true
+  # Keep the fallback path at least as parameter-rich as the first-stage path.
+  require_big_at_least_little_params: true
+  # Reference printed in logs for budget utilisation context.
+  param_budget_reference: 100000
+
+  # Encourage real cascades during search. Candidates outside this window are
+  # still valid, but their accuracy objective is softly penalised.
+  exit_ratio_min: 0.20
+  exit_ratio_max: 0.80
+  exit_penalty_weight: 0.20
+  # Keep threshold out of the NSGA-II architecture search so high thresholds
+  # cannot become a shortcut to high cascade accuracy with low exit ratio.
+  # Final retraining still sweeps thresholds post hoc.
+  fixed_threshold: 0.70
+
+  # Objectives (NSGA-II minimises both):
+  #   1) -(cascade_accuracy - exit_ratio_penalty)
+  #   2) avg_cascade_flops
+
+co_training:
+  label_smoothing: 0.0
+  little_loss_type: "ce"
+  cascade_aware: true
+  routing_sharpness: 20.0
+  little_aux_weight: 0.75
+  big_aux_weight: 0.05
+  defer_cost_weight: 0.01
+  confident_wrong_weight: 0.075
+  detach_routing_weight: true
+
+search_space:
+  little_channels: [8, 12, 16, 24, 32]
+  big_channels: [16, 24, 32, 48, 64]
+  layers_per_block: [1, 2]
+  kernel_sizes: [3, 5]
+  conv_types: [standard, depthwise_separable]
+  use_residual: [true, false]
+  little_blocks_range: [1, 3]
+  big_blocks_range: [2, 5]
+  threshold_range: [0.60, 0.95]  # retained for vector compatibility; search.fixed_threshold is used
+
+data:
+  dataset: cifar10
+  num_workers: 4
+
+seed: 42
+experiment_name: cifar10_cosearch_nas

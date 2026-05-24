@@ -1,0 +1,31 @@
+training:
+  epochs: 50
+  batch_size: 128
+  optimizer: sgd
+  lr: 0.1
+  momentum: 0.9
+  weight_decay: 5.0e-4
+  scheduler: cosine
+
+co_training:
+  label_smoothing: 0.1
+  little_loss_type: "ce"
+  cascade_aware: true
+  routing_sharpness: 20.0
+  little_aux_weight: 0.75
+  big_aux_weight: 0.05
+  defer_cost_weight: 0.0125
+  confident_wrong_weight: 0.075
+  detach_routing_weight: true
+
+evaluation:
+  threshold_sweep: [0.5, 0.6, 0.7, 0.8, 0.9, 0.95]
+  temperature_scaling: false
+  metrics: [cascade_acc, exit_ratio, cascade_flops, little_ece, routing_error_rate]
+
+data:
+  dataset: cifar10
+  num_workers: 4
+
+seed: 42
+experiment_name: cifar10_A_retrain_cascade_smooth

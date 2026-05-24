@@ -1,0 +1,50 @@
+search:
+  algorithm: nsga2
+  population_size: 20
+  n_generations: 10
+  proxy_epochs: 5
+  proxy_lr: 0.05
+  proxy_batch_size: 128
+  param_budget: 100000
+  min_params: 50000
+  memory_budget_bytes: 460800
+  feasible_sampling_attempts_factor: 500
+
+budget_split:
+  # Keep independent pairs in the same broad 50K-100K regime as co-search:
+  # little 15K-30K + big 40K-85K, with pair filtering enforcing <=100K.
+  little_min: 15000
+  little: 30000
+  big_min: 40000
+  big: 85000
+
+combine:
+  top_k: 5
+  threshold: 0.7
+  budget_tolerance: 0.35
+  require_big_more_blocks: true
+  require_big_at_least_little_params: true
+  save_checkpoints: true
+  retrain_epochs: 50
+  thresholds: [0.5, 0.6, 0.7, 0.8, 0.9, 0.95]
+
+co_training:
+  label_smoothing: 0.0
+  little_loss_type: "ce"
+
+search_space:
+  little_channels: [8, 12, 16, 24, 32]
+  big_channels: [16, 24, 32, 48, 64]
+  layers_per_block: [1, 2]
+  kernel_sizes: [3, 5]
+  conv_types: [standard, depthwise_separable]
+  use_residual: [true, false]
+  little_blocks_range: [1, 3]
+  big_blocks_range: [2, 5]
+
+data:
+  dataset: cifar10
+  num_workers: 4
+
+seed: 42
+experiment_name: cifar10_independent_nas

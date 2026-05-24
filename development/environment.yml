@@ -1,0 +1,18 @@
+name: nas-dev
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pytorch>=2.1
+  - torchvision>=0.16
+  - numpy
+  - pyyaml
+  - matplotlib
+  - pandas
+  - tqdm
+  - pip
+  - pip:
+      - ptflops>=0.7
+      - pymoo>=0.6

@@ -1,0 +1,7 @@
+accuracy,params,n_blocks,genotype
+0.6552,42218,4,"[{'ch': 32, 'ly': 2, 'ks': 3, 'ct': 'standard', 'res': True}, {'ch': 32, 'ly': 1, 'ks': 5, 'ct': 'depthwise_separable', 'res': False}, {'ch': 32, 'ly': 1, 'ks': 5, 'ct': 'standard', 'res': False}, {'ch': 32, 'ly': 2, 'ks': 5, 'ct': 'depthwise_separable', 'res': False}]"
+0.6410,40426,3,"[{'ch': 24, 'ly': 2, 'ks': 3, 'ct': 'standard', 'res': True}, {'ch': 24, 'ly': 1, 'ks': 3, 'ct': 'standard', 'res': False}, {'ch': 24, 'ly': 2, 'ks': 5, 'ct': 'standard', 'res': False}]"
+0.6934,44075,3,"[{'ch': 32, 'ly': 2, 'ks': 3, 'ct': 'depthwise_separable', 'res': True}, {'ch': 64, 'ly': 2, 'ks': 5, 'ct': 'depthwise_separable', 'res': False}, {'ch': 16, 'ly': 2, 'ks': 5, 'ct': 'standard', 'res': True}]"
+0.5716,40386,3,"[{'ch': 32, 'ly': 1, 'ks': 5, 'ct': 'standard', 'res': True}, {'ch': 24, 'ly': 2, 'ks': 5, 'ct': 'standard', 'res': True}, {'ch': 48, 'ly': 1, 'ks': 3, 'ct': 'depthwise_separable', 'res': True}]"
+0.6978,63979,3,"[{'ch': 32, 'ly': 2, 'ks': 3, 'ct': 'depthwise_separable', 'res': True}, {'ch': 64, 'ly': 2, 'ks': 3, 'ct': 'depthwise_separable', 'res': False}, {'ch': 24, 'ly': 2, 'ks': 5, 'ct': 'standard', 'res': True}]"
+0.6648,43803,3,"[{'ch': 64, 'ly': 2, 'ks': 3, 'ct': 'depthwise_separable', 'res': True}, {'ch': 32, 'ly': 2, 'ks': 3, 'ct': 'depthwise_separable', 'res': False}, {'ch': 24, 'ly': 2, 'ks': 5, 'ct': 'standard', 'res': False}]"

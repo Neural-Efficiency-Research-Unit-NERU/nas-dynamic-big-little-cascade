@@ -1,0 +1,3 @@
+run,threshold,cascade_acc,exit_ratio,routing_error_rate,little_acc,big_acc,little_flops,big_flops,cascade_flops,cascade_pct_of_big,little_ece
+C1 CE,0.7,0.8011,0.508,0.0269,0.6989,0.8173,380912.0,2629088.0,1674423.0,63.68835885295585,0.0117
+C3 current,0.7,0.8101,0.5369,0.0253,0.709,0.8202,380912.0,2629088.0,1598443.0,60.79838331771321,0.0058

@@ -1,0 +1,16 @@
+Model: NAS Architecture 3
+Genotype: {'little': [{'channels': 16, 'layers': 1, 'kernel_size': 5, 'conv_type': 'standard', 'use_residual': False}, {'channels': 24, 'layers': 1, 'kernel_size': 3, 'conv_type': 'standard', 'use_residual': False}, {'channels': 32, 'layers': 2, 'kernel_size': 3, 'conv_type': 'standard', 'use_residual': False}], 'big': [{'channels': 32, 'layers': 2, 'kernel_size': 3, 'conv_type': 'standard', 'use_residual': False}, {'channels': 16, 'layers': 1, 'kernel_size': 5, 'conv_type': 'depthwise_separable', 'use_residual': True}, {'channels': 24, 'layers': 1, 'kernel_size': 5, 'conv_type': 'standard', 'use_residual': True}, {'channels': 48, 'layers': 2, 'kernel_size': 3, 'conv_type': 'standard', 'use_residual': False}, {'channels': 32, 'layers': 1, 'kernel_size': 3, 'conv_type': 'standard', 'use_residual': False}], 'threshold': 0.7}
+Parameters: 89,076
+Memory: 401,360 bytes
+Little FLOPs: 786,752
+Big FLOPs: 2,995,520
+Proxy cascade acc: 0.6410
+Best val cascade acc: 0.8200
+
+Threshold sweep (test set, T=1.0):
+  t=0.50  cascade_acc=0.7941  exit=0.73  cascade_flops=1,591,948  ECE=0.0705  routing_err=0.0396
+  t=0.60  cascade_acc=0.8034  exit=0.61  cascade_flops=1,944,520  ECE=0.0705  routing_err=0.0193
+  t=0.70  cascade_acc=0.8077  exit=0.50  cascade_flops=2,279,120  ECE=0.0705  routing_err=0.0089
+  t=0.80  cascade_acc=0.8093  exit=0.38  cascade_flops=2,646,071  ECE=0.0705  routing_err=0.0030
+  t=0.90  cascade_acc=0.8103  exit=0.24  cascade_flops=3,065,744  ECE=0.0705  routing_err=0.0006
+  t=0.95  cascade_acc=0.8103  exit=0.14  cascade_flops=3,357,807  ECE=0.0705  routing_err=0.0000

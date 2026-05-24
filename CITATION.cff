@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this repository, please cite it using the metadata below."
+title: "Neural Architecture Search for Joint Big/Little Dynamic Inference Networks"
+type: software
+authors:
+  - family-names: Petersen
+    given-names: Kristoffer
+  - family-names: Larsen
+    given-names: Oliver
+  - family-names: Svendsen
+    given-names: Oliver
+  - family-names: Korsholm
+    given-names: Aleksander
+repository-code: "https://github.com/Neural-Efficiency-Research-Unit-NERU/nas-dynamic-big-little-cascade"
+url: "https://github.com/Neural-Efficiency-Research-Unit-NERU/nas-dynamic-big-little-cascade"
+date-released: 2026-05-24
+keywords:
+  - neural architecture search
+  - dynamic inference
+  - model cascade
+  - CIFAR-10
+  - edge AI
+  - PyTorch
+  - NSGA-II
