@@ -13,29 +13,10 @@
 \usepackage{soul}
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta,positioning,shapes.geometric}
-\graphicspath{
-{figures/search/}
-{figures/rq1/}
-{figures/ablations/}
-{figures/routing/}
-{figures/flops/}
-{figures/training/}
-{../development/experiments/plots/search/}
-{../development/experiments/plots/rq1/}
-{../development/experiments/plots/ablations/}
-{../development/experiments/plots/routing/}
-{../development/experiments/plots/flops/}
-{../development/experiments/plots/training/}
-{development/experiments/plots/search/}
-{development/experiments/plots/rq1/}
-{development/experiments/plots/ablations/}
-{development/experiments/plots/routing/}
-{development/experiments/plots/flops/}
-{development/experiments/plots/training/}
-}
+\graphicspath{{../development/experiments/plots/}{development/experiments/plots/}{figures/}{paper/figures/}}
 
-\newcommand{\TODO}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
 % Custom commands
+\newcommand{\TODO}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
 
 \hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue}
 
@@ -74,6 +55,8 @@ operating points than the independent baseline at the fixed confidence
 threshold $\tau=0.70$. The cheaper cascade-aware variant reaches 79.69\%
 accuracy at 1.67M MACs, while the highest-accuracy joint variant reaches
 80.69\% at 2.08M MACs; the independent baseline reaches 74.03\% at 2.22M MACs.
+A Raspberry Pi Pico 2 deployment further shows lower measured latency and
+route-aware energy for the joint cascade than for the independent baseline.
 The results show that, within this constrained training setting, the
 accuracy-FLOPs trade-off is shaped not only by model accuracy, but also by
 threshold choice, exit ratio, routing error, and capacity allocation between
@@ -116,7 +99,8 @@ can explore many architectural design choices under explicit constraints
 multi-objective architecture search, and dynamic inference, including early-exit
 networks and model cascades \cite{deb2002nsga2,lu2019nsganet,chebykin2022encas}.
 However, many cascade systems either design models independently or focus on
-placing exits inside a single backbone \ref{tab:related-comparison}. This leaves open the question of whether
+placing exits inside a single backbone (Table~\ref{tab:related-comparison}).
+This leaves open the question of whether
 a little and big model should be searched jointly as a pair, so that the search
 objective directly reflects cascade behavior.
 
@@ -164,7 +148,7 @@ retraining, and threshold-sweep evaluation of input-adaptive routing. In this
 work, framework refers to the complete experimental pipeline for constrained
 joint cascade search, retraining, and threshold-based evaluation, rather than a
 general-purpose reusable software package. The implementation and experiment
-scripts are available in the project repository.\footnote{\href{https://github.com/Neural-Efficiency-Research-Unit-NERU/nas-dynamic-big-little-cascade}{Neural-Efficiency-Research-Unit-NERU/nas-dynamic-big-little-cascade}}
+scripts are available in the project repository.\footnote{\url{LINK}}
 The final evaluation shows that the framework's main advantage comes from
 designing the cascade as a coupled system: the joint variants improve the
 accuracy-FLOPs trade-off over the independently searched baseline at the fixed
@@ -178,7 +162,8 @@ The main contributions of this work are:
     \item a joint NSGA-II co-search setup for big/little CNN cascades under memory and parameter constraints;
     \item a cascade-aware co-training loss using soft routing probabilities to align training with threshold-based inference;
     \item an ablation study of CE, CE with label smoothing, cascade-aware loss, and cascade-aware loss with label smoothing; and
-    \item an analysis showing that joint cascade design improves the observed accuracy/FLOPs trade-off, while threshold, exit ratio, routing errors, and capacity allocation explain the remaining differences between variants.
+    \item an analysis showing that joint cascade design improves the observed accuracy/FLOPs trade-off, while threshold, exit ratio, routing errors, and capacity allocation explain the remaining differences between variants; and
+    \item a Raspberry Pi Pico 2 deployment evaluation reporting on-device latency, route split, deployment-memory observations, and route-aware energy consumption.
 \end{itemize}
 
 The remainder of the report is structured as follows.
@@ -961,6 +946,45 @@ fronts, selected architectures, training curves, and per-threshold test sweeps.
 All plots and analysis are generated from these saved outputs, so the reported
 figures can be reproduced without re-running model training.
 
+\subsection{Pico 2 Deployment Test Setup}
+
+After final retraining, the selected cascades were exported to ONNX and then to
+float32 TensorFlow Lite models for TensorFlow Lite Micro. The exported little
+and big models were converted into C arrays and compiled into Raspberry Pi Pico
+2 firmware. The Pico firmware implements the same threshold router used in the
+offline evaluation: each image is first evaluated by the little model, the
+maximum softmax confidence is compared with $\tau=0.70$, and only
+low-confidence samples are deferred to the big model.
+
+Two Pico experiments were run. First, the normal latency and accuracy test used
+a USB serial protocol in which the host streamed CIFAR-10 test images to the
+Pico one sample at a time. This allowed the full 10,000-image CIFAR-10 test set
+to be evaluated without storing the entire dataset in Pico flash. For each
+sample, the Pico reported the predicted class, route decision, correctness,
+little-model time, big-model time when used, total cascade time, and analytical
+FLOP counts for the selected path. This is the source of the deployment latency
+and route-split results reported in Table~\ref{tab:pico-deployment}.
+
+Second, a route-aware energy test was run on a 1,000-image embedded CIFAR-10
+subset. This version stores the test subset in Pico flash and runs without USB
+power during measurement. Figure~\ref{fig:pico-energy-setup} shows the
+measurement circuit. An Elegoo Uno R3 powers the Pico 2 through a 10~$\Omega$
+high-side shunt connected to VSYS. The Uno samples the voltage before and after
+the shunt to estimate current and power, while Pico GP18 drives an inference
+trigger connected to Uno D2. In the route-aware build, Pico GP19 also indicates
+the route decision to Uno D3, with the high state representing deferred
+big-model execution. This setup separates idle time from the active inference
+window and records whether each measured inference used the little path or the
+deferred path.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{pico_uno_energy_fritzing_diagram.png}
+\caption{Route-aware Pico 2 energy measurement setup using a 10~$\Omega$
+high-side shunt, GP18 inference trigger, and GP19 route signal.}
+\label{fig:pico-energy-setup}
+\end{figure}
+
 % ============================================================================
 \section{Results}
 \label{sec:results}
@@ -1121,20 +1145,6 @@ together with confidence quality and accuracy.}
 \label{fig:rq3-routing}
 \end{figure*}
 
-\begin{figure*}[t]
-\centering
-\includegraphics[width=0.92\textwidth]{ablation_threshold_sweep_acc_exit.pdf}
-\caption{Threshold sweep for the C1-C4 retraining variants. Increasing the
-confidence threshold reduces the early-exit ratio and generally improves
-cascade accuracy by deferring more samples to the big model. Lower thresholds
-produce cheaper, more exit-heavy cascades, while higher thresholds approach
-big-model behaviour. The cascade-aware variants, C3 and C4, were trained with
-the same threshold through a soft routing term, so their sweep also shows how
-that training objective transfers when the inference threshold is moved away
-from $\tau=0.70$.}
-\label{fig:rq3-threshold-sensitivity}
-\end{figure*}
-
 In summary, RQ3 shows that the accuracy-FLOPs trade-off is explained by the
 interaction between threshold, exit quality, and capacity allocation. The
 threshold controls how aggressively the cascade exits; the exit ratio determines
@@ -1144,12 +1154,155 @@ input. The joint search performs better because it optimizes these factors as a
 coupled cascade, whereas the independent baseline can produce high exit ratios
 without equally strong routing quality or capacity allocation.
 
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{ablation_threshold_sweep_acc_exit.pdf}
+\caption{Threshold sweep for the C1-C4 retraining variants. Increasing the
+confidence threshold reduces the early-exit ratio and generally improves
+cascade accuracy by deferring more samples to the big model.}
+\label{fig:rq3-threshold-sensitivity}
+\end{figure}
+
 \subsection{Pico 2 Deployment Results}
 
-\TODO{Add Pico 2 deployment results. Report the exported model or cascade,
-the test subset size, the routing threshold, measured little-path and
-deferred-path latency, observed route split, and any deployment-memory
-observations.}
+To check whether the analytical cascade metrics transfer to an embedded target,
+the selected Arch2 C1--C4 cascades were exported from PyTorch checkpoints to
+ONNX and float32 TensorFlow Lite Micro models, then compiled into Raspberry Pi
+Pico 2 firmware. The independent NAS genotype 4 baseline was exported through
+the same path. The normal deployment test streamed the full CIFAR-10 test set
+over USB serial, so each operating point was evaluated on 10,000 images. All
+Pico runs used the same confidence threshold as the main comparison,
+$\tau=0.70$, with temperature $T=1.0$.
+
+\begin{table}[H]
+\centering
+\caption{Pico 2 serial CIFAR-10 deployment results at $\tau=0.70$. C1-C4 Arch2 And IDPT is indepdent 4 Architechture}
+\label{tab:pico-deployment}
+\begin{tabular}{lrrrrrr}
+\toprule
+\textbf{Cascade} & \textbf{Acc.} & \textbf{Exit} & \textbf{Defer} &
+\textbf{Little ms} & \textbf{Defer ms} & \textbf{Avg ms} \\
+\midrule
+C1 & 78.97 & 42.86 & 57.14 & 40.34 & 204.19 & 133.97 \\
+C2 & 79.96 & 32.66 & 67.34 & 40.36 & 204.21 & 150.70 \\
+C3 & 78.94 & 42.64 & 57.36 & 40.34 & 204.20 & 134.33 \\
+C4 & 80.46 & 27.60 & 72.40 & 40.37 & 204.22 & 159.00 \\
+IDPT4 & 73.47 & 58.99 & 41.01 & 131.93 & 848.45 & 425.77 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The Arch2 variants have almost identical per-path latency because they share
+the same exported architecture and differ mainly in trained weights and routing
+behaviour. Their little path takes about 40.3 ms, while a deferred sample takes
+about 204.2 ms end-to-end. The average latency therefore follows the observed
+route split: C1 and C3 are the fastest Arch2 variants because they exit on
+about 43\% of the test set, whereas C4 reaches the highest Pico accuracy but
+defers 72.4\% of samples and is correspondingly slower. The independent
+baseline exits more often than any Arch2 variant, but its little and deferred
+paths are much slower, giving a much higher average latency despite its higher
+exit ratio.
+
+The deployment also exposed a memory distinction that is not visible from
+accuracy and FLOPs alone. The Arch2 firmware used separate TensorFlow Lite
+Micro arenas of 128 KiB for the little model and 256 KiB for the big model,
+while the independent firmware required arena tuning and was finally tested
+with a 96 KiB little arena and a 352 KiB big arena. Additional independent
+energy builds with 160/288, 192/256, 224/224, and 256/192 KiB arena splits
+were produced to diagnose feasible allocations. This suggests that practical
+deployment feasibility depends not only on model weights and analytical FLOPs,
+but also on activation memory and TensorFlow Lite Micro arena requirements.
+
+\subsection{Energy Consumption}
+
+In addition to latency, a smaller route-aware energy experiment was run to
+measure whether the deployed cascade behaviour translates into lower energy
+use. Unlike the normal serial test, this energy run used a 1,000-image CIFAR-10
+subset embedded directly in Pico flash. This avoided USB streaming during the
+measurement window and allowed the Pico to be powered through the Uno/shunt
+path shown in Figure~\ref{fig:pico-energy-setup}. The Pico raised GP18 only
+during active cascade inference, so the Uno measurement excluded most idle
+time. The route-aware build also used GP19 to indicate whether a sample
+deferred to the big model.
+
+\begin{table}[H]
+\centering
+\caption{Route-aware Pico 2 energy measurement on a 1,000-sample embedded
+CIFAR-10 subset. The joint row corresponds to the exported Arch2 co-searched
+cascade used for the final Pico comparison.}
+\label{tab:pico-energy}
+\begin{tabular}{lrrrrrr}
+\toprule
+\textbf{Cascade} & \textbf{Time (s)} & \textbf{Energy (J)} &
+\textbf{J/sample} & \textbf{Power (W)} & \textbf{Exit} & \textbf{Defer} \\
+\midrule
+Independent 4 & 428.7 & 44.0 & 0.044 & 0.099 & 58.5 & 41.5 \\
+Joint Arch2 & 330.1 & 34.3 & 0.034 & 0.105 & 53.0 & 47.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The joint Arch2 cascade used 34.3 J over the embedded subset, compared with
+44.0 J for the independent baseline. This is a 22.0\% reduction in total energy
+and approximately the same reduction per image. Runtime also decreased from
+428.7 s to 330.1 s, a 23.0\% reduction. The average measured power is similar
+between the two runs, and is slightly higher for the joint cascade, so the
+energy saving is mainly explained by the shorter active inference time rather
+than by a lower instantaneous power draw.
+
+\begin{figure}[t]
+\centering
+\resizebox{\columnwidth}{!}{%
+\begin{tikzpicture}[x=1cm,y=1cm]
+    \node[font=\small\bfseries, anchor=west] at (0,3.15)
+        {Route-aware energy test};
+    \fill[blue!65] (0,2.72) rectangle (0.22,2.94);
+    \node[anchor=west] at (0.30,2.83) {\scriptsize Independent 4};
+    \fill[green!60!black] (2.45,2.72) rectangle (2.67,2.94);
+    \node[anchor=west] at (2.75,2.83) {\scriptsize Joint Arch2};
+
+    \node[anchor=east, font=\scriptsize\bfseries] at (1.05,2.20) {Energy};
+    \fill[blue!18] (1.25,2.35) rectangle (6.25,2.65);
+    \fill[blue!65] (1.25,2.35) rectangle (6.25,2.65);
+    \node[anchor=west] at (6.38,2.50) {\scriptsize 44.0 J};
+    \fill[green!18] (1.25,1.90) rectangle (6.25,2.20);
+    \fill[green!60!black] (1.25,1.90) rectangle (5.15,2.20);
+    \node[anchor=west] at (5.28,2.05) {\scriptsize 34.3 J};
+    \node[anchor=west, font=\scriptsize\bfseries, green!45!black]
+        at (6.38,2.05) {-22.0\%};
+
+    \node[anchor=east, font=\scriptsize\bfseries] at (1.05,1.00) {Runtime};
+    \fill[blue!18] (1.25,1.15) rectangle (6.25,1.45);
+    \fill[blue!65] (1.25,1.15) rectangle (6.25,1.45);
+    \node[anchor=west] at (6.38,1.30) {\scriptsize 428.7 s};
+    \fill[green!18] (1.25,0.70) rectangle (6.25,1.00);
+    \fill[green!60!black] (1.25,0.70) rectangle (5.10,1.00);
+    \node[anchor=west] at (5.23,0.85) {\scriptsize 330.1 s};
+    \node[anchor=west, font=\scriptsize\bfseries, green!45!black]
+        at (6.38,0.85) {-23.0\%};
+
+    \draw[gray!45] (1.25,0.42) -- (6.25,0.42);
+    \foreach \x/\label in {1.25/0,3.75/50,6.25/100}
+        \draw[gray!45] (\x,0.36) -- (\x,0.48)
+            node[below=0.08cm, black] {\scriptsize \label\%};
+\end{tikzpicture}}
+\caption{Normalized route-aware Pico 2 energy-test comparison. Independent 4
+is shown as the 100\% baseline; the joint Arch2 cascade reduces total energy by
+22.0\% and runtime by 23.0\% on the 1,000-sample embedded subset.}
+\label{fig:pico-energy-comparison}
+\end{figure}
+
+The route counts make this result especially useful. In the energy run, the
+joint cascade actually deferred slightly more samples than the independent
+baseline, but still consumed less total energy. This matches the latency result
+in Table~\ref{tab:pico-deployment}: the joint Arch2 paths are substantially
+faster, so the energy benefit does not come only from exiting more often. It
+comes from the deployed cost of each path. The independent baseline has a high
+exit ratio, but its little path and deferred path are both expensive on the
+Pico 2. This reinforces the conclusion that exit ratio, analytical FLOPs, and
+deployment memory must be interpreted together when judging whether a cascade is
+actually efficient on hardware.
+
 
 
 % ============================================================================
@@ -1286,10 +1439,51 @@ one emphasized during training.
 
 \subsection{Pico 2 Deployment Interpretation}
 
-\TODO{Discuss how the Pico 2 latency measurements relate to analytical MACs,
-exit ratio, and deployment memory. Note whether the measured latency supports
-the expected compute savings and where analytical FLOPs fail to capture
-hardware behaviour.}
+The Pico 2 measurements support the main dynamic-inference assumption behind
+the analytical FLOPs metric: early exits are cheaper than deferrals. For the
+Arch2 cascades, samples that exit after the little model take about 40 ms,
+whereas deferred samples take about 204 ms because the big model is evaluated
+after the little model. This approximately five-fold per-sample latency
+difference means that the exit ratio has a direct hardware effect. C1 and C3,
+which exit on about 43\% of samples, have lower average latency than C2 and C4,
+which defer more often. Thus, the measured latency confirms that avoiding the
+big model produces the expected compute saving on the Pico 2.
+
+At the same time, the hardware results show why analytical MACs should be
+treated as a proxy rather than a complete deployment model. Within the Arch2
+family, the average analytical FLOPs increase from roughly 0.87M MACs for C1
+and C3 to roughly 1.03M MACs for C4, and measured latency increases in the same
+direction. This agreement is useful because it validates the FLOPs objective as
+a reasonable ranking signal among closely related cascades. However, the
+independent baseline breaks any simple FLOPs-to-latency interpretation. Its
+average cascade cost is about 2.05M MACs, but its measured latency is 425.77
+ms, far more than a simple doubling of the Arch2 latency would suggest. The
+independent little model alone takes about 131.93 ms, more than three times the
+Arch2 little path, even though both are small enough to fit the search budget.
+
+This mismatch is likely caused by hardware details that are intentionally
+abstracted away during NAS. The analytical FLOPs calculation counts multiply-
+accumulate work, but it does not model TensorFlow Lite Micro kernel
+implementations, depthwise versus standard convolution efficiency on the Pico
+2, memory movement, cache effects, tensor layout conversions, or arena
+allocation pressure. It also does not capture the fact that deployment memory
+is split between flash-resident model data and SRAM-resident tensor arenas. The
+Arch2 models used a stable 128/256 KiB little/big arena split, whereas the
+independent baseline required a much larger big-model arena and several
+diagnostic builds. This reinforces the distinction made in the methodology:
+analytical MACs and estimated memory are useful for search and comparison, but
+final deployment still requires hardware measurement.
+
+Overall, the Pico 2 results strengthen the interpretation of RQ1 and RQ3. The
+joint Arch2 cascades do not only look better on the analytical
+accuracy--FLOPs frontier; they also run substantially faster on the target
+microcontroller. The measured route split explains much of the latency
+difference within a fixed architecture, while the independent baseline shows
+that a high exit ratio is not sufficient when the little model itself is slow
+and memory-hungry. The deployment results therefore support the expected
+compute savings of threshold-based cascades, but they also show that FLOPs,
+exit ratio, and memory must be interpreted together rather than as independent
+deployment predictors.
 
 \subsection{Dataset and Framework Interpretation}
 
@@ -1390,14 +1584,17 @@ values and therefore affect the cascade's exit decisions.
 
 \subsubsection{Pico Deployment Measurements}
 The Pico 2 evaluation measures on-device latency and routing behaviour, which
-is an important step beyond reporting only proxy FLOPs. Nevertheless, the
-deployment evaluation does not measure power draw or energy
-per prediction. For microcontroller applications, especially battery-powered
-ones, energy may be as important as latency. A cascade that is faster is not
-necessarily the most energy-efficient if its power draw differs across model
-paths or if repeated big model invocations have a disproportionate cost. Future
-evaluation should therefore include direct power or energy measurements in
-addition to accuracy, route split, and latency.
+is an important step beyond reporting only proxy FLOPs. The route-aware energy
+test adds an initial direct measurement of energy on a 1,000-sample embedded
+subset, but it is less comprehensive than the 10,000-sample serial latency
+evaluation and is reported only for the final joint-vs-independent comparison.
+For microcontroller applications, especially battery-powered ones, energy may
+be as important as latency. A cascade that is faster is not necessarily the most
+energy-efficient if its power draw differs across model paths or if repeated
+big model invocations have a disproportionate cost. Future evaluation should
+therefore include repeated energy measurements across all C1--C4 variants,
+additional boards, and quantized models in addition to accuracy, route split,
+and latency.
 
 \subsection{Future Work}
 Future work should first evaluate the framework on a more complex dataset such
@@ -1468,11 +1665,16 @@ ratio, and the selected architecture.
 The experiments also show that threshold choice, exit ratio, calibration, and
 routing error are essential for interpreting cascade systems. A cascade is only
 efficient when the little model exits on samples it can classify correctly; a
-high exit ratio alone is not sufficient. Overall, the project demonstrates a
-reproducible framework for NAS-driven dynamic inference and shows that joint
-cascade design can improve the accuracy-compute trade-off, while leaving open
-important questions about loss design, calibration, larger datasets, and
-hardware-aware optimization.
+high exit ratio alone is not sufficient. The Pico 2 deployment confirms this
+hardware view: the joint Arch2 cascade has much lower measured latency and
+lower route-aware energy than the independent baseline, even though the
+independent baseline exits more often. This shows why analytical MACs are
+useful search proxies but cannot fully capture TensorFlow Lite Micro latency,
+arena pressure, and board-level energy behaviour. Overall, the project
+demonstrates a reproducible framework for NAS-driven dynamic inference and
+shows that joint cascade design can improve the accuracy-compute trade-off,
+while leaving open important questions about loss design, calibration, larger
+datasets, quantization, and hardware-aware optimization.
 
 % ============================================================================
 \section*{Acknowledgments}
