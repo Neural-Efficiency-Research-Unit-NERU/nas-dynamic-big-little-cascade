@@ -13,8 +13,33 @@
 \usepackage{soul}
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta,positioning,shapes.geometric}
-\graphicspath{{../development/experiments/plots/}{development/experiments/plots/}{figures/}{paper/figures/}}
+\graphicspath{
+{figures/search/}
+{figures/rq1/}
+{figures/ablations/}
+{figures/routing/}
+{figures/flops/}
+{figures/training/}
+{figures/}
+{paper/figures/}
+{../development/experiments/plots/search/}
+{../development/experiments/plots/rq1/}
+{../development/experiments/plots/ablations/}
+{../development/experiments/plots/routing/}
+{../development/experiments/plots/flops/}
+{../development/experiments/plots/training/}
+{../development/experiments/plots/}
+{development/experiments/plots/search/}
+{development/experiments/plots/rq1/}
+{development/experiments/plots/ablations/}
+{development/experiments/plots/routing/}
+{development/experiments/plots/flops/}
+{development/experiments/plots/training/}
+{development/experiments/plots/}
+}
 
+% Custom commands
+\newcommand{\TODO}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
 
 \hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue}
 
@@ -146,7 +171,7 @@ retraining, and threshold-sweep evaluation of input-adaptive routing. In this
 work, framework refers to the complete experimental pipeline for constrained
 joint cascade search, retraining, and threshold-based evaluation, rather than a
 general-purpose reusable software package. The implementation and experiment
-scripts are available in the project repository.\footnote{\url{LINK}}
+scripts are available in the project repository.\footnote{\href{https://github.com/Neural-Efficiency-Research-Unit-NERU/nas-dynamic-big-little-cascade}{Neural-Efficiency-Research-Unit-NERU/nas-dynamic-big-little-cascade}}
 The final evaluation shows that the framework's main advantage comes from
 designing the cascade as a coupled system: the joint variants improve the
 accuracy-FLOPs trade-off over the independently searched baseline at the fixed
@@ -1152,14 +1177,19 @@ input. The joint search performs better because it optimizes these factors as a
 coupled cascade, whereas the independent baseline can produce high exit ratios
 without equally strong routing quality or capacity allocation.
 
-\begin{figure}[H]
+\begin{figure*}[t]
 \centering
-\includegraphics[width=\columnwidth]{ablation_threshold_sweep_acc_exit.pdf}
+\includegraphics[width=0.92\textwidth]{ablation_threshold_sweep_acc_exit.pdf}
 \caption{Threshold sweep for the C1-C4 retraining variants. Increasing the
 confidence threshold reduces the early-exit ratio and generally improves
-cascade accuracy by deferring more samples to the big model.}
+cascade accuracy by deferring more samples to the big model. Lower thresholds
+produce cheaper, more exit-heavy cascades, while higher thresholds approach
+big-model behaviour. The cascade-aware variants, C3 and C4, were trained with
+the same threshold through a soft routing term, so their sweep also shows how
+that training objective transfers when the inference threshold is moved away
+from $\tau=0.70$.}
 \label{fig:rq3-threshold-sensitivity}
-\end{figure}
+\end{figure*}
 
 \subsection{Pico 2 Deployment Results}
 
@@ -1174,18 +1204,21 @@ $\tau=0.70$, with temperature $T=1.0$.
 
 \begin{table}[H]
 \centering
-\caption{Pico 2 serial CIFAR-10 deployment results at $\tau=0.70$. C1-C4 Arch2 And IDPT is indepdent 4 Architechture}
+\caption{Pico 2 serial CIFAR-10 deployment results at $\tau=0.70$. The
+little-path latency is the end-to-end latency for samples that exit after the
+little model. The deferred-path latency includes both the little model and the
+big model.}
 \label{tab:pico-deployment}
 \begin{tabular}{lrrrrrr}
 \toprule
 \textbf{Cascade} & \textbf{Acc.} & \textbf{Exit} & \textbf{Defer} &
 \textbf{Little ms} & \textbf{Defer ms} & \textbf{Avg ms} \\
 \midrule
-C1 & 78.97 & 42.86 & 57.14 & 40.34 & 204.19 & 133.97 \\
-C2 & 79.96 & 32.66 & 67.34 & 40.36 & 204.21 & 150.70 \\
-C3 & 78.94 & 42.64 & 57.36 & 40.34 & 204.20 & 134.33 \\
-C4 & 80.46 & 27.60 & 72.40 & 40.37 & 204.22 & 159.00 \\
-IDPT4 & 73.47 & 58.99 & 41.01 & 131.93 & 848.45 & 425.77 \\
+Arch2 C1 & 78.97 & 42.86 & 57.14 & 40.34 & 204.19 & 133.97 \\
+Arch2 C2 & 79.96 & 32.66 & 67.34 & 40.36 & 204.21 & 150.70 \\
+Arch2 C3 & 78.94 & 42.64 & 57.36 & 40.34 & 204.20 & 134.33 \\
+Arch2 C4 & 80.46 & 27.60 & 72.40 & 40.37 & 204.22 & 159.00 \\
+Independent 4 & 73.47 & 58.99 & 41.01 & 131.93 & 848.45 & 425.77 \\
 \bottomrule
 \end{tabular}
 \end{table}
