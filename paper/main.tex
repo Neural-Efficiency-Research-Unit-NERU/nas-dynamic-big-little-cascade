@@ -37,7 +37,7 @@
 {development/experiments/plots/}
 }
 
-\hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue}
+\hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue, hypertexnames=false}
 
 % ============================================================================
 \begin{document}
@@ -979,7 +979,7 @@ Table~\ref{tab:retraining-loss-ablations}. The ablation isolates whether
 improvements come from standard cross-entropy (C1), label smoothing (C2),
 the cascade-aware loss (C3), or its combination with label smoothing (C4).
 CE is the default baseline because it is the standard supervised
-classification objective \cite{goodfellow2016deeplearning,zhang2018gce}.
+classification objective \cite{goodfellow2016deeplearning}.
 Label smoothing is included because cascade routing depends on confidence,
 and smoothing is a simple calibration-oriented baseline
 \cite{mueller2019labelsmoothing,guo2017calibration}.
