@@ -228,7 +228,7 @@ class NASProblem(Problem):
 
     Objectives (both minimised):
       - f1 = -(cascade_accuracy - exit_ratio_penalty)
-      - f2 = avg_cascade_flops
+      - f2 = avg_cascade_macs
 
     Hard constraints:
       - total_bytes <= MEMORY_BUDGET_BYTES
@@ -307,7 +307,7 @@ class NASProblem(Problem):
             )
             genotype_key = str(genotype.to_dict())
 
-            # Pre-compute analytical memory + FLOPs (cheap, avoids building infeasible)
+            # Pre-compute analytical memory + MACs (cheap, avoids building infeasible)
             memory = estimate_pair_memory(genotype)
             flops_breakdown = estimate_pair_flops(genotype)
             total_bytes = memory["total_bytes"]
@@ -359,7 +359,7 @@ class NASProblem(Problem):
                 or param_order_violation > 0
             ):
                 # Skip training for infeasible candidates.
-                # Use float("inf") on the flops objective so it cannot accidentally
+                # Use float("inf") on the MAC objective so it cannot accidentally
                 # appear on the Pareto front.
                 f1_list.append(0.0)
                 f2_list.append(float("inf"))
@@ -465,7 +465,7 @@ class NASProblem(Problem):
                 f"ObjAcc {objective_acc:.4f} | "
                 f"ECE {result.get('little_ece', 0):.4f} | "
                 f"RoutErr {result.get('routing_error_rate', 0):.4f} | "
-                f"Flops {cascade_flops_val:>10,.0f} | "
+                f"MACs {cascade_flops_val:>10,.0f} | "
                 f"Bytes {total_bytes:>7,} (util {utilisation:.2f}) | "
                 f"Params {total_params:>7,} | Blocks {n_little}+{n_big} | "
                 f"Thr {threshold:.3f} | {elapsed:.1f}s"
@@ -505,7 +505,7 @@ def run_search(
 ) -> Path:
     """Run NSGA-II co-search and return path to results CSV.
 
-    Objectives: maximise cascade accuracy, minimise avg cascade FLOPs.
+    Objectives: maximise cascade accuracy, minimise avg cascade MACs.
     Hard constraint: deployment memory <= memory_budget_bytes (default 460800).
     """
     pop_size = config["search"]["population_size"]

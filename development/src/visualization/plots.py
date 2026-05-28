@@ -86,9 +86,9 @@ def plot_training_curves(history: dict, model_name: str, output_dir: Path):
 
 
 def plot_nas_search_progress(search_log_path: Path, output_dir: Path):
-    """Scatter plot of NAS evaluations vs generation. Primary axis is avg cascade FLOPs.
+    """Scatter plot of NAS evaluations vs generation. Primary axis is avg cascade MACs.
 
-    NAS optimizes cascade accuracy and average cascade FLOPs, so the
+    NAS optimizes cascade accuracy and average cascade MACs, so the
     search-progress visualization follows those two quantities.
     """
     _setup_style()
@@ -114,7 +114,7 @@ def plot_nas_search_progress(search_log_path: Path, output_dir: Path):
     )
     cbar = plt.colorbar(scatter, ax=ax)
     cbar.set_label("Generation")
-    ax.set_xlabel("Average Cascade FLOPs (M MACs)")
+    ax.set_xlabel("Average Cascade MACs (M MACs)")
     ax.set_ylabel("Proxy Cascade Accuracy (%)")
     ax.set_title("NAS Search Progress (memory hard constraint = 450 KB)")
     ax.grid(True, alpha=0.3)
@@ -128,9 +128,9 @@ def plot_pareto_frontier(
     output_dir: Path,
     selected_path: Path | None = None,
 ):
-    """Joint-NAS Pareto frontier: cascade accuracy vs avg cascade FLOPs.
+    """Joint-NAS Pareto frontier: cascade accuracy vs avg cascade MACs.
 
-    The X-axis is the actual NAS objective, average cascade FLOPs, rather than
+    The X-axis is the actual NAS objective, average cascade MACs, rather than
     parameter count.
     """
     _setup_style()
@@ -216,9 +216,9 @@ def plot_pareto_frontier(
                 zorder=6,
             )
 
-    ax.set_xlabel("Average Cascade FLOPs (M MACs)")
+    ax.set_xlabel("Average Cascade MACs (M MACs)")
     ax.set_ylabel("Cascade Accuracy (%)")
-    ax.set_title("Pareto Frontier: Accuracy vs. Avg Cascade FLOPs")
+    ax.set_title("Pareto Frontier: Accuracy vs. Avg Cascade MACs")
     ax.legend(loc="lower right")
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
@@ -332,11 +332,11 @@ def plot_acc_vs_flops_curve(
     deferral_data: list[dict],
     output_dir: Path | None = None,
 ) -> plt.Figure:
-    """Cascade accuracy vs avg cascade FLOPs as threshold varies.
+    """Cascade accuracy vs avg cascade MACs as threshold varies.
 
     Sibling of `plot_deferral_curve` (which uses exit_ratio on the X-axis).
     This is the cleaner reading of the same data: at a given compute budget
-    (avg FLOPs), what accuracy do we get?
+    (avg MACs), what accuracy do we get?
     """
     _setup_style()
     fig, ax = plt.subplots(figsize=(8, 5))
@@ -352,9 +352,9 @@ def plot_acc_vs_flops_curve(
                         textcoords="offset points", xytext=(4, 5),
                         fontsize=7, color=d["color"])
 
-    ax.set_xlabel("Average Cascade FLOPs (M MACs)")
+    ax.set_xlabel("Average Cascade MACs (M MACs)")
     ax.set_ylabel("Cascade Accuracy (%)")
-    ax.set_title("Cascade Accuracy vs. FLOPs (threshold-swept)")
+    ax.set_title("Cascade Accuracy vs. MACs (threshold-swept)")
     ax.legend()
     ax.grid(True, alpha=0.3)
     fig.tight_layout()

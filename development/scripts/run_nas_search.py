@@ -82,7 +82,7 @@ def main():
         f"Exit-ratio guard: target [{exit_low:.2f}, {exit_high:.2f}], "
         f"objective penalty weight {exit_penalty:.3f}"
     )
-    print(f"Objectives: maximise cascade accuracy, minimise avg cascade FLOPs")
+    print(f"Objectives: maximise cascade accuracy, minimise avg cascade MACs")
     print()
 
     run_search(train_loader, val_loader, config, device, exp_dir)

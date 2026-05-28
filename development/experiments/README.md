@@ -16,9 +16,9 @@ generated plots.
 | `cifar10_A_retrain_cascade_smooth/` | C4 retraining: cascade-aware loss with label smoothing. |
 | `plots/search/` | NAS search-progress and selected-architecture figures. |
 | `plots/rq1/` | Joint-vs-independent comparison figures. |
-| `plots/ablations/` | C1-C4 ablation accuracy and accuracy/FLOPs figures. |
+| `plots/ablations/` | C1-C4 ablation accuracy and accuracy/MAC figures. |
 | `plots/routing/` | Threshold, ECE, confidence, and routing diagnostics. |
-| `plots/flops/` | Little, big, and expected cascade FLOPs breakdowns. |
+| `plots/flops/` | Little, big, and expected cascade MAC breakdowns. |
 | `plots/training/` | Training-curve overlays and per-architecture curves. |
 
 The CIFAR-10 dataset itself is not stored here. It is downloaded automatically

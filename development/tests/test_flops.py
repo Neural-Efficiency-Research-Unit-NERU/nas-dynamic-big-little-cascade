@@ -1,4 +1,4 @@
-"""Tests for analytical FLOPs (MACs) estimation."""
+"""Tests for analytical MAC estimation."""
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -12,7 +12,7 @@ def _make_pair(little_blocks: list[BlockGene], big_blocks: list[BlockGene]) -> P
 
 
 def test_flops_known_standard_conv():
-    """Verify FLOPs for a known genotype with standard conv matches hand calculation.
+    """Verify MACs for a known genotype with standard conv matches hand calculation.
 
     Little path (2 blocks, ch=8, k=3, layers=1, standard, no residual):
       Block 0: in_ch=3, out_ch=8, stride=2 -> h=16,w=16
@@ -40,7 +40,7 @@ def test_flops_known_standard_conv():
 
 
 def test_flops_depthwise_less_than_standard():
-    """Depthwise separable should use fewer FLOPs than standard conv at same config."""
+    """Depthwise separable should use fewer MACs than standard conv at same config."""
     std_block = BlockGene(channels=32, layers=1, kernel_size=3, conv_type="standard", use_residual=False)
     dws_block = BlockGene(channels=32, layers=1, kernel_size=3, conv_type="depthwise_separable", use_residual=False)
 
@@ -51,7 +51,7 @@ def test_flops_depthwise_less_than_standard():
 
 
 def test_flops_more_channels_more_flops():
-    """Larger channel count => more FLOPs."""
+    """Larger channel count => more MACs."""
     small = BlockGene(channels=8, layers=1, kernel_size=3, conv_type="standard", use_residual=False)
     large = BlockGene(channels=48, layers=1, kernel_size=3, conv_type="standard", use_residual=False)
 

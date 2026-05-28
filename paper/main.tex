@@ -10,7 +10,6 @@
 \usepackage{xcolor}
 \usepackage{hyperref}
 \usepackage{float}
-\usepackage{soul}
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta,positioning,shapes.geometric}
 \graphicspath{
@@ -38,9 +37,6 @@
 {development/experiments/plots/}
 }
 
-% Custom commands
-\newcommand{\TODO}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
-
 \hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue}
 
 % ============================================================================
@@ -52,7 +48,7 @@
     \IEEEauthorblockN{Kristoffer Petersen, Oliver Larsen, Oliver Svendsen, Aleksander Korsholm}
     \IEEEauthorblockA{
         University of Southern Denmark (SDU)\\
-        \textit{Supervisors:} Emil Jorgensen, Francesco Daghero
+        \textit{Supervisors:} Emil Jørgensen Njor, Francesco Daghero
     }
 }
 
@@ -62,58 +58,67 @@
 
 % ============================================================================
 \begin{abstract}
-Dynamic inference can reduce average compute by using a small model for easy
-inputs and deferring harder inputs to a larger model. This work studies whether
-the two models in such a big/little cascade should be searched independently or
-jointly as one cascade. We propose a constrained NSGA-II co-search pipeline for
-CIFAR-10 that searches little-big CNN pairs under MCU-motivated memory and
-parameter constraints, optimizing proxy cascade accuracy and expected cascade
-FLOPs. The joint search is compared with an independent NAS baseline where
-little and big models are searched separately and combined afterwards. We also
-evaluate four retraining objectives: cross-entropy, cross-entropy with label
-smoothing, a cascade-aware co-training loss, and the same cascade-aware loss
-with label smoothing. Under a practical compute budget with 5-epoch proxy
-training and 50-epoch final retraining, joint co-search finds stronger final
-operating points than the independent baseline at the fixed confidence
-threshold $\tau=0.70$. The cheaper cascade-aware variant reaches 79.69\%
-accuracy at 1.67M MACs, while the highest-accuracy joint variant reaches
-80.69\% at 2.08M MACs; the independent baseline reaches 74.03\% at 2.22M MACs.
-A Raspberry Pi Pico 2 deployment further shows lower measured latency and
-route-aware energy for the joint cascade than for the independent baseline.
-The results show that, within this constrained training setting, the
-accuracy-FLOPs trade-off is shaped not only by model accuracy, but also by
-threshold choice, exit ratio, routing error, and capacity allocation between
-the little and big models.
+Edge and battery-powered systems increasingly run deep neural networks
+on-device, where strict memory, latency, and energy budgets constrain how
+much computation each input is allowed
+reduces the average cost by adapting computation to input difficulty: a
+small ``little'' network handles easy inputs, and harder inputs are
+deferred to a larger ``big'' network. Designing such a big/little
+cascade is a coupled problem. The two networks must share a routing rule,
+a memory budget, and a calibration behaviour, yet most existing work
+either places multiple exits inside a single backbone or composes a
+cascade from networks trained independently. We ask whether the little
+and big networks should instead be searched \emph{jointly} as a cascade
+pair under explicit microcontroller (MCU) deployment constraints. We
+propose a constrained NSGA-II co-search that selects
+little/big CNN pairs on CIFAR-10 and compare it against an independent
+NAS baseline. At a fixed routing threshold $\tau=0.70$, the joint cascade
+reaches 80.69\% accuracy at 2.08~M MACs against 74.03\% at 2.22~M MACs
+for the independent baseline. Deployed on a 512~KiB microcontroller, the
+joint cascade further reduces measured runtime by 23\% and route-aware
+energy by 22\% over the same baseline.
 \end{abstract}
 
 % ============================================================================
 \section{Introduction}
 \label{sec:introduction}
 
-Deep neural networks have become increasingly accurate, but their computational
-cost makes deployment difficult on resource-constrained devices. Edge and
-embedded systems often have strict limits on memory, latency, and energy, while
-still needing reliable predictions. A common way to reduce inference cost is
-dynamic inference: instead of spending the same computation on every input, the
-system adapts its computation to the difficulty of each sample. In a
-big/little cascade, a small model is evaluated first. If the small model is
-confident, the system exits early; otherwise, the sample is deferred to a larger
-model. Cascades can decide this route in different ways, for example using a
-learned gate, a margin-based rule, or a confidence threshold. This report uses a
-maximum-softmax confidence threshold because it adds no extra routing model, has
-negligible overhead, and is easy to evaluate under embedded constraints. Such a
-cascade can reduce average FLOPs substantially, but only if the little model is
-accurate enough on easy samples, the big model is strong enough on deferred
-samples, and the threshold routes examples correctly.
+Deep neural networks have grown both more accurate and more expensive
+\cite{he2016resnet,tan2019efficientnet}. The same models that deliver strong
+predictions in the cloud are increasingly being asked to run on-device, on
+microcontrollers and other battery-powered embedded systems where a typical
+flash and SRAM budget is under one megabyte and average inference energy is a
+first-class constraint \cite{warden2019tinyml,david2021tflm,lin2020mcunet}.
+Always-on classification, keyword spotting, and sensor processing in this
+``TinyML'' regime has motivated benchmarks and tooling for on-device deep
+learning \cite{banbury2021mlperftiny}, but the gap between
+state-of-the-art network capacity and microcontroller resources remains large.
 
-Designing such cascades is therefore not only a problem of finding two accurate
+\emph{Dynamic inference} narrows this gap by spending compute only where it
+is needed. Rather than running a fixed network on every input, a dynamic
+network adapts the inference path to each sample
+\cite{han2021dynamic,bolukbasi2017adaptive}. A big/little cascade is one of
+the simplest such designs \cite{park2015biglittle}: a cheap ``little''
+network is evaluated on every input, and a more expressive ``big'' network
+is invoked only when the little network is uncertain. The cascade can decide
+this route with a learned gate \cite{regol2024jeidnn,wang2018skipnet}, a
+margin-based rule \cite{bolukbasi2017adaptive}, or a confidence threshold
+\cite{teerapittayanon2017branchynet,kaya2019shallowdeep}.We use a
+maximum-softmax confidence threshold because it requires no extra routing
+model, has negligible runtime overhead, and is straightforward to deploy
+under embedded constraints. The full routing rule is given in
+Section~\ref{sec:background:routing}. Such a cascade reduces average compute
+only if the little network is accurate on easy samples, the big network is
+strong on deferred samples, and the threshold routes examples correctly.
+
+Designing such cascades is not just a matter of finding two accurate
 models. The two models must work together under a shared routing rule and a
 shared deployment budget. If the little model is too small, it may rarely exit
 correctly. If the big model receives too much capacity, the cascade may become
 accurate but expensive. If the confidence threshold is too low, confident
 wrong exits can damage accuracy; if it is too high, most samples defer and the
 cascade loses its computational benefit. These trade-offs make cascade design a
-multi-objective problem involving accuracy, FLOPs, exit ratio, memory, and
+multi-objective problem involving accuracy, MACs, exit ratio, memory, and
 calibration.
 
 Neural architecture search (NAS) is a natural tool for this setting because it
@@ -127,77 +132,228 @@ This leaves open the question of whether
 a little and big model should be searched jointly as a pair, so that the search
 objective directly reflects cascade behavior.
 
-This report studies that question using a CIFAR-10 big/little cascade under an
-edge-style deployment constraint. We compare a joint co-search method, where
-NSGA-II searches complete little-big pairs, with an independent baseline, where
-little and big models are searched separately and combined afterwards. Both
-methods use the same underlying CNN search space, the same proxy-training
-budget, and comparable resource constraints. The joint search optimizes cascade
-accuracy and average cascade FLOPs directly, while the independent baseline
-tests whether good standalone models are sufficient to produce good cascades.
+This report studies that question on CIFAR-10 under an edge-style deployment
+constraint. We compare a joint co-search method, in which NSGA-II searches
+complete little/big pairs against cascade accuracy and expected cascade MACs
+directly, against an independent baseline that searches the two roles
+separately as standalone classifiers and combines them afterwards. Both
+methods share the underlying CNN search space, the same
+\emph{proxy-training} budget (a short 5-epoch run used only to rank
+candidates during search; final claims use full retraining), and the
+deployment constraints. The comparison therefore isolates the effect of
+\emph{searching as a cascade} from the effect of architectural capacity.
 
-Architecture search is only part of the problem. Since cascade routing depends
-on confidence, the final training objective may also matter. Cross-entropy (CE)
-optimizes classification accuracy, but it does not explicitly account for the
-fact that some samples should exit at the little model while others should
-defer. Confidence calibration and label smoothing are also relevant because
-miscalibrated confidence can cause incorrect early exits
+Architecture search is only part of the problem, however, because cascade
+routing depends on confidence. Cross-entropy (CE) optimizes classification
+accuracy but does not reflect the fact that some samples should exit at the
+little model while others should defer, and miscalibrated confidence
+translates directly into harmful early exits
 \cite{guo2017calibration,mueller2019labelsmoothing,li2021learningtocascade}.
-We therefore evaluate the selected joint architectures under four retraining
-settings: CE, CE with label smoothing, a cascade-aware loss, and the
-cascade-aware loss with label smoothing. This separates the architecture-search
-question from the training-objective question.
+We therefore retrain the selected joint architectures under four objectives:
+CE, CE with label smoothing, a cascade-aware co-training loss, and the
+cascade-aware loss combined with label smoothing. These choices are not
+fully orthogonal: the cascade-aware loss is itself confidence-shaping and
+interacts with the architecture's routing behaviour at the same threshold, so RQ2 is studied as an ablation over a fixed set of selected
+architectures rather than as an independent optimisation.
 
-The report is organized around three research questions:
+The report is organised around two research questions:
 
 \begin{itemize}
     \item \textbf{RQ1:} Does joint NAS co-search of a little/big model pair
-    produce a better final cascade accuracy versus average cascade FLOPs
-    trade-off than independently searched and combined model pairs under matched
-    search spaces and edge-memory constraints?
+    produce a better final cascade accuracy versus average cascade MACs
+    trade-off than independently searched and combined model pairs under
+    matched search spaces and edge-memory constraints?
 
     \item \textbf{RQ2:} After architectures are selected by joint NAS, does
     cascade-aware co-training improve cascade accuracy, routing quality, or
     calibration compared with standard CE and CE with label smoothing?
-
-    \item \textbf{RQ3:} How do threshold choice, exit ratio, and model-size
-    allocation explain the observed accuracy/FLOPs trade-offs?
 \end{itemize}
 
-Taken together, these questions define the experimental framework studied in
-this report: constrained joint architecture search for NAS-driven big/little
-dynamic inference, a matched independent-search baseline, cascade-aware
-retraining, and threshold-sweep evaluation of input-adaptive routing. In this
-work, framework refers to the complete experimental pipeline for constrained
-joint cascade search, retraining, and threshold-based evaluation, rather than a
-general-purpose reusable software package. The implementation and experiment
-scripts are available in the project repository.\footnote{\href{https://github.com/Neural-Efficiency-Research-Unit-NERU/nas-dynamic-big-little-cascade}{Neural-Efficiency-Research-Unit-NERU/nas-dynamic-big-little-cascade}}
-The final evaluation shows that the framework's main advantage comes from
-designing the cascade as a coupled system: the joint variants improve the
-accuracy-FLOPs trade-off over the independently searched baseline at the fixed
-operating threshold. The cascade-aware loss is therefore treated as a
-retraining ablation rather than the sole contribution; it is useful for
-analyzing and tuning routing behaviour, while the C1-C4 variants expose the
-trade-off between cheaper early exits and higher-accuracy deferral.
+We also analyse how the operating threshold $\tau$, the resulting exit
+ratio, and the little-model calibration jointly shape the deployed
+accuracy MACs trade-off. This is a follow-up analysis on the selected
+joint cascades rather than a separate research question.
 
-The main contributions of this work are:
-\begin{itemize}
-    \item a joint NSGA-II co-search setup for big/little CNN cascades under memory and parameter constraints;
-    \item a cascade-aware co-training loss using soft routing probabilities to align training with threshold-based inference;
-    \item an ablation study of CE, CE with label smoothing, cascade-aware loss, and cascade-aware loss with label smoothing; and
-    \item an analysis showing that joint cascade design improves the observed accuracy/FLOPs trade-off, while threshold, exit ratio, routing errors, and capacity allocation explain the remaining differences between variants; and
-    \item a Raspberry Pi Pico 2 deployment evaluation reporting on-device latency, route split, deployment-memory observations, and route-aware energy consumption.
-\end{itemize}
+The implementation and experiment scripts are available in the project
+repository.\footnote{\href{https://github.com/Neural-Efficiency-Research-Unit-NERU/nas-dynamic-big-little-cascade}{Neural-Efficiency-Research-Unit-NERU/nas-dynamic-big-little-cascade}}
+
+\medskip\noindent\textbf{Contributions.} This work makes the following
+contributions:
+\begin{enumerate}
+    \item A joint NSGA-II co-search procedure for big/little CNN cascades
+    under a 450~KiB combined weight-plus-activation budget motivated by a
+    512~KiB MCU. The comparison keeps the search space, proxy budget, and
+    deployment constraints matched between joint and independent NAS.
+
+    \item A cascade-aware co-training loss that replaces the hard routing
+    decision with a soft exit probability based on the little network's
+    confidence, so that little-model and big-model cross-entropy are
+    weighted by the route a sample is likely to take. Treated as an
+    ablation (conditions C1-C4 in
+    Section~\ref{sec:methodology:loss-ablations}), it shows how retraining
+    choices shift the same selected architectures between cheaper and more
+    accurate operating points.
+
+    \item A microcontroller deployment study on a Raspberry Pi Pico 2
+    connecting the analytical accuracy-MACs frontier to measured runtime
+    and route-aware energy while fitting within the TensorFlow Lite Micro
+    \cite{david2021tflm} memory arenas of the target.
+
+    \item An analysis of how threshold $\tau$, exit ratio $\rho$, calibration
+    (ECE, Section~\ref{sec:background:ece}), and routing error jointly shape
+    the deployed accuracy-MACs trade-off, explaining why a high exit ratio
+    on the independent baseline does not translate into a stronger cascade.
+\end{enumerate}
 
 The remainder of the report is structured as follows.
-Section~\ref{sec:related} reviews dynamic inference, NAS for efficient models,
-and confidence calibration for cascade routing. Section~\ref{sec:methodology}
-describes the cascade model, search space, joint and independent NAS procedures,
-and retraining losses. Section~\ref{sec:experiments} presents the experimental
-setup and evaluation metrics. Section~\ref{sec:results} reports the results for
-the three research questions. Section~\ref{sec:discussion} discusses the main
-findings, limitations, and future work, and Section~\ref{sec:conclusion}
-concludes the report.
+Section~\ref{sec:background} introduces the background concepts shared by the
+rest of the paper (threshold-routed cascades, neural architecture search, and
+calibration). Section~\ref{sec:related} reviews dynamic inference, NAS for
+efficient models, and confidence calibration for cascade routing.
+Section~\ref{sec:methodology} describes the search space, the joint and
+independent NAS procedures, and the cascade-aware loss.
+Section~\ref{sec:experiments} presents the experimental setup and evaluation
+metrics. Section~\ref{sec:results} reports the results for the two research
+questions and the supporting routing analysis. Section~\ref{sec:discussion} discusses the main findings,
+limitations, and future work, and Section~\ref{sec:conclusion} concludes the
+report.
+
+% ============================================================================
+\section{Background}
+\label{sec:background}
+
+This section defines the components shared by the rest of the paper: the
+big/little cascade routing rule, the architecture-search formulation, and the
+calibration metric used to interpret confidence-based routing.
+
+\subsection{Big/Little Cascade Routing}
+\label{sec:background:routing}
+
+A big/little cascade chains a lightweight \emph{little} model with a larger
+\emph{big} model that acts as a fallback for samples the little model is
+uncertain about \cite{park2015biglittle}. For each input $x$, the little model
+is evaluated first and produces logits $z_l$. We use the \emph{max-softmax}
+confidence,
+\begin{equation}
+c_l = \max(\mathrm{softmax}(z_l)),
+\label{eq:max-softmax}
+\end{equation}
+because it requires no auxiliary gating network, adds negligible runtime
+overhead, and is straightforward to evaluate on embedded targets
+\cite{guo2017calibration,teerapittayanon2017branchynet}. The cascade applies
+a fixed threshold $\tau$: if $c_l > \tau$, the little model's prediction
+$\hat{y}_l$ is accepted and the cascade exits. Otherwise the input is
+deferred to the big model, which produces logits $z_b$ and prediction $\hat{y}_b$. This
+threshold rule is illustrated in Figure~\ref{fig:cascade-routing}.
+
+\begin{figure}[t]
+\centering
+\resizebox{\columnwidth}{!}{%
+\begin{tikzpicture}[
+    node distance=1.1cm and 1.2cm,
+    box/.style={
+        draw,
+        rounded corners,
+        align=center,
+        minimum width=2.2cm,
+        minimum height=0.8cm
+    },
+    inputbox/.style={box, fill=gray!8, draw=gray!60!black},
+    littlebox/.style={box, fill=blue!10, draw=blue!55!black},
+    confbox/.style={box, fill=violet!10, draw=violet!60!black},
+    exitbox/.style={box, fill=green!14, draw=green!50!black},
+    bigbox/.style={box, fill=orange!16, draw=orange!70!black},
+    decision/.style={
+        draw,
+        diamond,
+        aspect=1.8,
+        align=center,
+        inner sep=1.2pt,
+        minimum width=2.0cm,
+        fill=orange!10,
+        draw=orange!70!black
+    },
+    arrow/.style={-{Latex[length=2mm]}, thick}
+]
+\node[inputbox] (input) {Input\\$x$};
+\node[littlebox, right=of input] (little) {Little CNN\\predicts $\hat{y}_l$};
+\node[confbox, right=of little] (conf) {Confidence\\$c_l=\max \mathrm{softmax}(z_l)$};
+\node[decision, below=of conf] (gate) {$c_l > \tau$?};
+\node[exitbox, left=of gate] (exit) {Exit early\\use $\hat{y}_l$};
+\node[bigbox, right=of gate] (big) {Big CNN\\predicts $\hat{y}_b$};
+\node[bigbox, right=of big] (final) {Deferred output\\use $\hat{y}_b$};
+
+\draw[arrow] (input) -- (little);
+\draw[arrow] (little) -- (conf);
+\draw[arrow] (conf) -- (gate);
+\draw[arrow] (gate) -- node[above] {yes} (exit);
+\draw[arrow] (gate) -- node[above] {no} (big);
+\draw[arrow] (big) -- (final);
+
+\node[align=center, below=0.25cm of exit] {\small cost: $F_l$};
+\node[align=center, below=0.25cm of big] {\small cost: $F_l+F_b$};
+\end{tikzpicture}%
+}
+\caption{Threshold-based routing in the big/little cascade. Every sample pays
+the little-model cost $F_l$; green denotes the early-exit path for samples
+with $c_l > \tau$, while orange denotes the deferred path that additionally
+pays the big-model cost $F_b$.}
+\label{fig:cascade-routing}
+\end{figure}
+
+Let $\rho \in [0,1]$ denote the \emph{exit ratio}, the fraction of samples
+handled by the little model alone. The expected per-sample compute cost
+(measured in multiply-accumulate operations, MACs) is then
+\begin{equation}
+F_{\mathrm{cascade}} = F_l + (1-\rho)\, F_b,
+\label{eq:cascade-cost}
+\end{equation}
+where $F_l$ and $F_b$ are the analytical MAC counts of the little and big
+models. The first term is paid on every input; only the deferred fraction
+$1-\rho$ pays the big-model cost \cite{park2015biglittle,han2021dynamic}.
+
+\subsection{Neural Architecture Search}
+\label{sec:background:nas}
+
+Neural Architecture Search (NAS) refers to a class of \emph{algorithms} that
+automate architecture design \cite{elsken2019nassurvey}. A NAS algorithm is
+defined by three components: a \emph{search space} of candidate architectures,
+a \emph{search strategy} that explores it, and a \emph{performance-estimation
+method} that scores candidates. Modern NAS methods range from
+reinforcement-learning controllers \cite{zoph2017nasrl}, through evolutionary
+algorithms \cite{real2019regevo,deb2002nsga2}, to differentiable relaxations
+\cite{liu2019darts} and weight-sharing supernetworks \cite{pham2018enas}.
+Because full retraining of every candidate is computationally prohibitive,
+practical NAS uses a proxy: a short training run (here, 5 epochs) whose final
+accuracy is used as a ranking signal for the search, with longer retraining
+applied only to the selected architectures
+\cite{real2019regevo,liu2019darts}. NAS additionally optimizes
+non-accuracy targets such as MACs, memory, or latency
+\cite{lu2019nsganet,chebykin2022encas,benmeziane2021hwnas}; In this report, we use NSGA-II, a multi-objective algorithm\cite{deb2002nsga2}, because it can evaluate architectures using more than one objective at the same time, such as accuracy and compute cost. This makes it suitable for mixed discrete architecture variables and produces an explicit Pareto front for the accuracy-compute trade-off.
+
+
+\subsection{Confidence Calibration and Expected Calibration Error}
+\label{sec:background:ece}
+
+A classifier is \emph{well calibrated} when its predicted confidence matches
+its empirical accuracy: among samples with $c_l \approx 0.7$, the model should
+be correct about 70\% of the time. Modern deep networks are typically
+overconfident \cite{guo2017calibration}, which is consequential for cascades
+because miscalibrated confidence directly biases the threshold router toward
+unsafe early exits \cite{li2021learningtocascade}. We quantify calibration
+using Expected Calibration Error (ECE) \cite{naeini2015ece,guo2017calibration}.
+Test samples are sorted by predicted confidence and grouped into $K$
+equal-width bins $B_1,\dots,B_K$; ECE is the
+weighted gap between the average confidence and the average accuracy in each
+bin,
+\begin{equation}
+\mathrm{ECE} = \sum_{k=1}^{K} \frac{|B_k|}{N}\,
+\bigl|\mathrm{acc}(B_k) - \mathrm{conf}(B_k)\bigr|.
+\label{eq:ece}
+\end{equation}
+We use $K=15$ bins, following common practice \cite{guo2017calibration}, and
+report ECE for the little model since its confidence is the quantity the
+threshold router actually consumes.
 
 % ============================================================================
 \section{Related Work}
@@ -244,7 +400,7 @@ retraining losses.
 \subsection{NAS for Dynamic Inference}
 \label{sec:related:nasdynamic}
 
-NAS automates architecture design by defining a search space, a search
+NAS automates architecture design using a defined search space, a search
 strategy, and a performance-estimation method \cite{elsken2019nassurvey}. It is
 particularly relevant for dynamic inference because accuracy and compute must be
 optimized jointly. Multi-objective evolutionary NAS is a common fit for this
@@ -275,7 +431,7 @@ whether the architectures of the two cascade members should be searched jointly.
 
 ENCAS is the closest related work on NAS for model cascades. It performs
 evolutionary neural cascade search across pretrained supernetworks to obtain a
-front of cascades trading accuracy against FLOPs \cite{chebykin2022encas}. Our
+front of cascades trading accuracy against MACs \cite{chebykin2022encas}. Our
 work differs in two ways. First, we co-search the little and big models from a
 small role-specific CNN search space under a strict edge-memory budget, rather
 than composing subnetworks from pretrained supernetworks. Second, we explicitly
@@ -289,7 +445,7 @@ study whether cascade-aware retraining improves the selected architectures.
 Modern neural networks are often miscalibrated: their predicted probabilities
 can be more confident than their empirical accuracy \cite{guo2017calibration}.
 This is especially important for cascades because the confidence score is not
-only a diagnostic quantity; it controls computation. A poorly calibrated little
+only a diagnostic quantity, since it controls computation. A poorly calibrated little
 model can exit on samples that should have been deferred to the big model. As a
 result, optimizing standalone classification accuracy is not necessarily enough
 to optimize cascade accuracy.
@@ -304,15 +460,17 @@ al.\ show that it can improve calibration in some settings
 training objective as part of the cascade design, rather than evaluating only
 the searched architecture.
 
-Cascade-specific calibration is more directly aligned with our problem.
-Learning to Cascade argues that calibration should be optimized for the
-accuracy-cost behavior of the whole cascade, not only for matching confidence
-to model accuracy \cite{li2021learningtocascade}. Our cascade-aware loss follows
-the same motivation but is used as a retraining objective for a jointly searched
-big/little pair. It introduces soft routing weights during training so that
-little-model and big-model losses are weighted according to the expected route
-of each sample. The goal is to improve cascade behavior without replacing the
-simple threshold rule used at inference.
+to model accuracy \cite{li2021learningtocascade}. This distinction matters
+because confidence is also the routing signal: an overconfident little model
+can save compute but produce an incorrect early exit, while an underconfident
+little model may defer too often and lose the computational benefit of the
+cascade. A useful confidence score should therefore separate samples the little
+model can handle from samples that are worth sending to the big model. Our
+cascade-aware loss follows the same motivation but is used as a retraining
+objective for a jointly searched big/little pair. It introduces soft routing
+weights during training so that little-model and big-model losses are weighted
+according to the expected route of each sample. The goal is to improve cascade
+behavior without replacing the simple threshold rule used at inference.
 
 
 % Related-work subsection divider
@@ -320,7 +478,7 @@ simple threshold rule used at inference.
 \label{sec:related:hwnas}
 
 Hardware-aware NAS extends architecture search with deployment constraints such
-as latency, memory, energy, FLOPs, or parameter count. This is important because
+as latency, memory, energy, MACs, or parameter count. This is important because
 the most accurate architecture under an unconstrained search is often not
 deployable on edge hardware. Surveys of hardware-aware NAS describe how search
 objectives can be coupled to device-specific measurements or analytical proxies
@@ -331,13 +489,13 @@ directly on the target task and hardware instead of relying only on proxy tasks
 efficient mobile building blocks \cite{howard2019mobilenetv3}.
 
 During NAS, our search uses analytical resource constraints rather than measured
-latency: deployment memory, parameter count, and average cascade FLOPs. This
+latency: deployment memory, parameter count, and average cascade MACs. This
 keeps architecture selection reproducible and independent of measurement noise
 from a specific hardware run. Measured Pico 2 latency is treated separately as a
 deployment evaluation after model selection. The memory constraint is applied to
 the whole cascade, not just to each model separately. This matters because a
 good cascade is a capacity-allocation problem: the little model must be large
-enough to exit correctly, while the big model must still have enough capacity to
+enough to exit correctly for the majority of easy samples, while the big model must still have enough capacity to
 improve deferred samples.
 
 % Related-work subsection divider
@@ -347,12 +505,38 @@ improve deferred samples.
 Table~\ref{tab:related-comparison} summarizes how the most relevant methods
 relate to this work. Existing work strongly supports the usefulness of dynamic
 inference, early exits, confidence-aware routing, and hardware-aware NAS.
-However, two gaps remain. First, most NAS methods for dynamic inference search
-early exits inside one backbone or assemble cascades from pretrained models; few
-study co-search of two independent role-specific architectures under a shared
-cascade objective. Second, the training objective for cascades is still not
-settled. A loss that improves routing may also harm branch accuracy, so it must
-be evaluated separately from the architecture search itself.
+
+Before pointing at the gaps, it is worth noting that two distinct dynamic
+designs dominate the literature. \emph{Single-backbone early-exit
+networks} (BranchyNet \cite{teerapittayanon2017branchynet}, MSDNet
+\cite{huang2018msdnet}, EDANAS \cite{gambella2023edanas}, NACHOS
+\cite{gambella2025nachos}) attach auxiliary classifiers at intermediate
+depths of one network and exit when an auxiliary head is confident; the
+backbone, exit positions, and exit heads are co-optimised. \emph{Two-CNN
+cascades} (Park et al.\ \cite{park2015biglittle}, ENCAS
+\cite{chebykin2022encas}) instead use two separately-trained
+networks of different capacity and route between them by a confidence
+threshold. The two designs trade off different things. Early-exit
+backbones share feature extraction and so are typically more
+parameter-efficient at iso-capacity, but the same shared backbone also
+forces the cheap and expensive paths to live on the same memory arena and
+to be optimised against a single loss surface, which can be brittle on
+embedded targets. Two-CNN cascades pay the memory overhead of a second
+model, but gain a clean memory partition (each model has its own arena
+allocation, which matters on TensorFlow Lite Micro
+\cite{david2021tflm}), simpler training, and the ability to allocate
+capacity asymmetrically between an easy-case classifier and a
+hard-case fallback. Our work focuses on this two-CNN regime and asks
+whether the two role-specific architectures should additionally be
+\emph{co-searched}, not just co-trained or co-routed.
+
+Two gaps remain in this setting. First, most NAS methods for dynamic
+inference search early exits inside one backbone or assemble cascades
+from pretrained models; few study co-search of two independent
+role-specific architectures under a shared cascade objective. Second, the
+training objective for cascades is still not settled. A loss that
+improves routing may also harm branch accuracy, so it must be evaluated
+separately from the architecture search itself.
 
 \begin{table*}[t]
 \centering
@@ -364,17 +548,17 @@ be evaluated separately from the architecture search itself.
 Method & Main idea & Architecture setting & Relation to this work \\
 \midrule
 BranchyNet \cite{teerapittayanon2017branchynet} &
-Early exits with side classifiers &
+Early exits with side classifiers, gated by max-softmax confidence &
 Single backbone &
-Motivates confidence-based early exit \\
+Source of our max-softmax routing rule, but inside one backbone \\
 MSDNet \cite{huang2018msdnet} &
 Multi-scale anytime/budgeted classification &
 Single backbone &
 Shows adaptive compute improves efficiency \\
-Park et al. \cite{park2015biglittle} &
-Big/little low-power inference &
-Two-model cascade &
-Foundational cascade design, not NAS co-search \\
+Park et al.\ \cite{park2015biglittle} &
+Big/little low-power inference; samples routed by little-model softmax confidence &
+Two manually-designed models &
+Foundational cascade design we follow, but architectures are not searched \\
 EDANAS \cite{gambella2023edanas} &
 NAS for early-exit networks &
 Single early-exit network &
@@ -403,72 +587,20 @@ Compares joint vs.\ independent search and losses \\
 \section{Methodology}
 \label{sec:methodology}
 
-This section describes the cascade inference system, the architecture search
-space, and the two design procedures compared in the experiments. The
-methodology separates two questions: RQ1 evaluates whether the two models
-should be searched jointly or independently, while RQ2 evaluates whether the
-final retraining loss improves the selected cascades.
+This section describes the architecture search space and the two design
+procedures compared in the experiments: joint NSGA-II co-search of complete
+big/little cascade pairs, and an independent baseline that searches the two
+roles separately. Both procedures evaluate candidates under the routing rule
+and cost model defined in
+Section~\ref{sec:background:routing} (Eq.~\ref{eq:max-softmax} and
+Eq.~\ref{eq:cascade-cost}). The cascade-aware retraining loss used for the
+RQ2 ablation is also introduced here.
 
-\subsection{Cascade Architecture and Routing}
-
-The cascade consists of two independent CNNs: a lightweight little model and a larger big model. For each input $x$, the little model is evaluated first. Its confidence is computed as the maximum softmax probability,
-\[
-c_l = \max(\mathrm{softmax}(z_l)),
-\]
-where $z_l$ are the little-model logits. If $c_l > \tau$, the cascade accepts the little model's prediction and exits early. Otherwise, the input is deferred to the big model.
-
-Figure~\ref{fig:cascade-routing} shows this threshold-based routing rule. Every input is processed by the little model, but only inputs below the confidence threshold $\tau$ are sent to the big model.
-
-\begin{figure}[t]
-\centering
-\resizebox{\columnwidth}{!}{%
-\begin{tikzpicture}[
-    node distance=1.1cm and 1.2cm,
-    box/.style={
-        draw,
-        rounded corners,
-        align=center,
-        minimum width=2.2cm,
-        minimum height=0.8cm
-    },
-    decision/.style={
-        draw,
-        diamond,
-        aspect=1.8,
-        align=center,
-        inner sep=1.2pt,
-        minimum width=2.0cm
-    },
-    arrow/.style={-{Latex[length=2mm]}, thick}
-]
-\node[box] (input) {Input\\$x$};
-\node[box, right=of input] (little) {Little CNN\\predicts $\hat{y}_l$};
-\node[box, right=of little] (conf) {Confidence\\$c_l=\max \mathrm{softmax}(z_l)$};
-\node[decision, below=of conf] (gate) {$c_l > \tau$?};
-\node[box, left=of gate] (exit) {Exit early\\use $\hat{y}_l$};
-\node[box, right=of gate] (big) {Big CNN\\predicts $\hat{y}_b$};
-\node[box, right=of big] (final) {Deferred output\\use $\hat{y}_b$};
-
-\draw[arrow] (input) -- (little);
-\draw[arrow] (little) -- (conf);
-\draw[arrow] (conf) -- (gate);
-\draw[arrow] (gate) -- node[above] {yes} (exit);
-\draw[arrow] (gate) -- node[above] {no} (big);
-\draw[arrow] (big) -- (final);
-
-\node[align=center, below=0.25cm of exit] {\small cost: $F_l$};
-\node[align=center, below=0.25cm of big] {\small cost: $F_l+F_b$};
-\end{tikzpicture}%
-}
-\caption{Threshold-based routing in the big/little cascade. The little model is always evaluated. If its confidence is above the threshold $\tau$, the cascade exits early; otherwise, the input is deferred to the big model.}
-\label{fig:cascade-routing}
-\end{figure}
-
-We report the exit ratio $\rho$, defined as the fraction of samples handled by the little model alone. The expected cascade FLOPs are then
-\[
-F_{\mathrm{cascade}} = F_l + (1-\rho)F_b,
-\]
-where $F_l$ and $F_b$ are the FLOPs of the little and big models. This metric captures the dynamic-inference cost: every sample pays for the little model, while only deferred samples pay for the big model. We also report routing error rate, which measures cases where the little model exits incorrectly although the big model would have predicted correctly.
+Figure~\ref{fig:search-pipeline} contrasts the joint and independent
+pipelines side by side. The joint pipeline (steps J1-J7) treats the
+cascade as a coupled object as soon as proxy training begins, while the
+independent baseline (steps I1-I7) does not assemble a cascade until I4;
+the rest of this section refers to these step labels.
 
 \subsection{Search Space and Resource Constraints}
 
@@ -501,163 +633,194 @@ capacity to serve as a fallback for harder samples. The block ranges follow the
 same role separation: the little model is limited to fewer stages, while the big
 model can use deeper feature extraction.
 
-All candidates must satisfy deployment constraints motivated by embedded
-inference. The deployment-memory estimate includes both models' weights, the
-input buffer, and the larger of the two peak activation footprints, since the
-cascade evaluates the models sequentially. Joint NAS enforces a
-450\,KiB deployment-memory cap, a 50K-100K combined-parameter
-window, role-level lower bounds of little $\geq$15K and big $\geq$40K
-parameters, role-level upper bounds of little $\leq$30K and big $\leq$85K
-parameters, the role-order constraint that the big model must have at least as
-many parameters as the little model, and the structural rule that the big model
-must have more blocks than the little model. The independent baseline uses the
-same search space and role-order rules, but searches the roles separately with
-the same explicit parameter ranges: 15K-30K for little and 40K-85K for big.
+All candidates must satisfy a set of deployment constraints motivated by
+fitting the cascade on a 512\,KiB-class microcontroller. The
+deployment-memory estimate sums both models' float32 weights, the input
+buffer, and the larger of the two peak activation footprints (the models are
+evaluated sequentially, so their activation arenas can be re-used). The
+constraints are summarised in Table~\ref{tab:search-constraints} and apply
+identically to the joint and independent NAS procedures.
 
-The 450\,KiB cap is chosen as a practical target for deployment on a 512\,KiB
-MCU. It leaves some margin for runtime overhead, stack usage, framework code,
-and other buffers instead of assuming that the full 512\,KiB can be used only
-for model storage and activations. This creates a tight embedded-memory setting
-where the search must make meaningful capacity trade-offs instead of simply
-increasing both models. The parameter lower bounds prevent the search from
-exploiting extremely small models that are cheap but not useful classifiers,
-while the upper bounds keep the two roles within the same capacity envelope for
-both search strategies. The big-model upper bound is higher because a 15K little
-model can still be paired with an 85K fallback without exceeding the 100K
-combined cap. The role-order constraints prevent the first-stage model from
-becoming larger than the fallback model. Together, the parameter and block-order
-rules enforce a clear separation between the cheap first-stage model and the
-more expressive fallback model.
+\begin{table}[t]
+\centering
+\caption{Search constraints applied to every candidate. The 450\,KiB
+combined cap leaves $\approx$60\,KiB of headroom against the 512\,KiB target
+for stack, framework code, and runtime buffers.}
+\label{tab:search-constraints}
+\footnotesize
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Constraint} & \textbf{Value} \\
+\midrule
+Combined weight+activation budget   & $\leq 450$\,KiB \\
+Combined parameter window           & 50K-100K \\
+Little-model parameter range        & 15K-30K \\
+Big-model parameter range           & 40K-85K \\
+Role-order (parameters)             & $|\theta_b| \geq |\theta_l|$ \\
+Role-order (blocks)                 & blocks$(b)>$ blocks$(l)$ \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-The memory and FLOP constraints used during search are analytical estimates.
-Parameters and activations are counted as float32 values, not quantized weights.
-This keeps the search reproducible across execution environments, but it also
-means the NAS resource numbers should be interpreted as model-level deployment
-proxies. Direct Pico 2 latency is reported separately after the architectures
-have been selected and exported.
+The lower bounds prevent the search from exploiting models that are cheap
+but trivially weak. The upper bounds keep the two roles within a shared
+capacity envelope. The big-model upper bound (85K) is higher than the
+little-model upper bound (30K) so that a 15K little model can still be
+paired with an 85K big model without exceeding the 100K combined cap. The
+role-order constraints prevent the first-stage model from being larger than
+the fallback. All memory and MAC numbers in this section are
+\emph{analytical} estimates computed in float32: direct Pico 2 latency and
+TensorFlow Lite Micro \cite{david2021tflm} arena sizes are reported
+separately in Section~\ref{sec:results:pico} after the architectures have
+been exported.
 
 \subsection{Joint Co-Search with NSGA-II}
+\label{sec:methodology:joint}
 
-The joint NAS experiment searches little-big model pairs directly. Each
-candidate encodes both architectures and is first checked against the hard
-memory, parameter, and depth-order constraints. Infeasible candidates are
-rejected analytically and are not proxy-trained. Feasible candidates are
-proxy-trained for 5 epochs using the cascade-aware shared loss, then evaluated
-as a cascade at a fixed threshold $\tau=0.70$. The co-search proxy loss uses
-$k=20$, $\lambda_l=0.75$, $\lambda_b=0.05$, $\lambda_d=0.01$, and
-$\lambda_w=0.075$, with no label smoothing. The 5-epoch proxy budget is a
-compromise: it is long enough to separate clearly weak architectures from
-promising ones, but short enough to evaluate hundreds of candidates within the
-available compute budget.
+The joint NAS experiment searches little/big model pairs directly. Each
+candidate (J1 in Figure~\ref{fig:search-pipeline}) encodes both
+architectures and is first checked against the hard constraints of
+Table~\ref{tab:search-constraints} (J2); infeasible candidates are
+rejected analytically and are not proxy-trained. The initial sampler and
+offspring repair operator keep drawing or repairing candidates until the
+population contains feasible pairs, so infeasible samples do not reduce the
+number of proxy-trained candidates in a generation. Feasible candidates
+proceed to J3, where the pair is proxy-trained for 5 epochs using the
+cascade-aware shared loss (Section~\ref{sec:methodology:loss}), and J4,
+where the trained pair is evaluated as a cascade at the fixed threshold
+$\tau=0.70$. The 5-epoch proxy is the same heuristic used by
+short-budget NAS methods such as regularised evolution
+\cite{real2019regevo} and DARTS \cite{liu2019darts}: long enough to separate
+clearly weak architectures from promising ones, short enough to evaluate
+hundreds of candidates within the available compute.
 
-The threshold is fixed during architecture search rather than optimized as part
-of the genotype. This avoids a shortcut where the search can improve proxy
-cascade accuracy by choosing a high threshold that defers almost every sample to
-the big model. Thresholds are instead swept after final retraining, where the
-accuracy-FLOPs trade-off can be analyzed explicitly. The value $\tau=0.70$ was
-chosen as a practical proxy-search setting: it is low enough that the little
-model can exit on some samples during proxy evaluation, but high enough that
-early exits still require meaningful confidence.
+NSGA-II \cite{deb2002nsga2} (implemented via pymoo \cite{blank2020pymoo}) optimises two objectives simultaneously:
+\emph{maximise} proxy cascade accuracy and \emph{minimise} expected cascade
+MACs (Equation.~\ref{eq:cascade-cost}). We do not collapse the two objectives into
+a scalar reward because the relative weighting between accuracy and compute
+is the engineering decision an embedded deployment should make
+post hoc, not an arbitrary search-time constant. Candidates whose exit ratio
+$\rho$ falls outside the routing window $[0.20, 0.80]$ receive a soft
+penalty of $0.20$ on the accuracy objective. This discourages degenerate
+solutions that always defer to the big model (which would dominate the
+accuracy objective at high MACs) or always exit at the little model (which
+would dominate the MACs objective at low accuracy). The threshold $\tau$ is
+held fixed during search to prevent the search from trivially raising it to
+make the cascade defer everything. We use $\tau=0.70$ as the main operating
+point because it is permissive enough to produce meaningful early exits under
+the short proxy-training budget, while still filtering clearly low-confidence
+little-model predictions. Final operating points are swept post
+hoc. Figure~\ref{fig:nas-search-progress} visualises the 400 proxy-trained
+candidates across the 20 generations of the joint search and shows how
+NSGA-II's elitist selection concentrates later generations in the
+high-accuracy, low-MACs region of the feasible space.
 
-Infeasible architectures are filtered before proxy training using analytical
-parameter, memory, and block-order checks. The evolutionary initialization and
-offspring repair steps also attempt to sample or repair candidates into the
-feasible region. This prevents the search budget from being dominated by invalid
-architectures and makes the number of proxy-trained candidates more meaningful.
-For joint co-search, these checks include both pair-level constraints and
-role-level little/big parameter ranges before the candidate is proxy-trained.
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{nas_search_progress.pdf}
+\caption{Joint NSGA-II co-search progress across all 400 proxy-trained
+candidates (20 generations $\times$ 20 individuals). Each point is one
+little/big cascade pair; the x-axis is the average cascade MACs the search
+minimises and the y-axis is the proxy cascade accuracy it maximises. Colour
+encodes generation (darker = earlier). All plotted candidates satisfy the
+450~KiB deployment-memory constraint, which is checked analytically before
+proxy training. Later generations cluster toward higher accuracy at moderate
+MACs as the elitist multi-objective selection moves the population toward
+the joint Pareto frontier.}
+\label{fig:nas-search-progress}
+\end{figure}
 
-NSGA-II is used because the search is naturally multi-objective: we want high cascade accuracy and low average cascade FLOPs under hard deployment constraints. Rather than choosing an arbitrary scalar weighting between accuracy and compute, NSGA-II produces a Pareto front of architecture pairs and makes the accuracy-compute trade-off explicit. It is also a practical choice for this study because it is well-established, straightforward to implement for mixed discrete architecture variables, and sufficient for answering whether joint pair search improves the observed accuracy-FLOPs trade-off. The two objectives are therefore to maximize proxy cascade accuracy and minimize expected cascade FLOPs. Candidates with exit ratios outside the desired routing window are softly penalized, so the search does not only find accurate pairs that almost always defer to the big model.
-
-After the search, three candidates are selected for full retraining from the
-proxy Pareto region. The selector keeps only candidates whose expected cascade
-FLOPs are lower than the big model's standalone FLOPs,
-$F_{\mathrm{cascade}} < F_b$, so the selected pair represents a genuine
-compute-saving cascade rather than a slower two-stage system. Within this
-filtered region, the chosen candidates are the knee point of the proxy
-accuracy-FLOPs frontier and its nearest unique neighbours. This favors
-architectures around the point where additional compute gives diminishing
-proxy-accuracy gains, while avoiding duplicate genotypes. The selection rule
-therefore does not simply take the three highest proxy-accuracy candidates;
-it chooses representative candidates from the compute-saving knee region and
-leaves final performance claims to the fully retrained test results. The proxy
-frontier and selected candidates are shown in
+After the search, three candidates are chosen for full retraining from the
+proxy Pareto region. Let $\mathcal{P}$ be the set of proxy-Pareto-optimal
+candidates and $F_b(\pi)$ be the big model's standalone MACs for candidate
+$\pi\in\mathcal{P}$. The selector first filters
+\begin{equation}
+\mathcal{P}_{\mathrm{cs}} = \{\,\pi \in \mathcal{P} \mid
+F_{\mathrm{cascade}}(\pi) < F_b(\pi)\,\},
+\label{eq:knee-filter}
+\end{equation}
+so that every selected pair is a genuine compute-saving cascade. Within
+$\mathcal{P}_{\mathrm{cs}}$ the chosen candidates are the knee point and its
+two nearest \emph{unique} neighbours, which captures the operating region
+where additional compute gives diminishing proxy-accuracy gains without
+selecting duplicate genotypes. The selection rule does not simply take the
+three highest proxy-accuracy candidates. The proxy frontier and
+the three selected candidates are shown in
 Figure~\ref{fig:appendix-proxy-selection} in
-Appendix~\ref{app:diagnostic-plots}.
+Appendix.
 
 \subsection{Independent NAS Baseline}
 
-The independent baseline is designed to test whether joint pair search provides
-value beyond searching two good models separately. In this baseline, little and
-big architectures are optimized in two separate NSGA-II searches. Each search
-optimizes standalone validation accuracy against parameter count within its
-role-specific budget. Parameter count is used at this stage because each model
-is searched before cascade routing exists, so expected cascade FLOPs cannot yet
-be computed. Generated role candidates are checked analytically against their
-role-specific parameter ranges before proxy training: little candidates must be
-within 15K-30K parameters, while big candidates must be within 40K-85K
-parameters. The initial population samples only role-feasible candidates, and
-offspring outside the configured role range are repaired by resampling a
-feasible replacement before evaluation. The resulting role-specific Pareto
-candidates are then combined post hoc into cascade pairs. At this stage, the
-combiner enumerates all little-Pareto by big-Pareto pairings rather than taking
-only the top few models from each role. Pair-level feasibility is checked after
-combination, including the total parameter budget, deployment-memory cap, and
-the role-order rules that the big model must have at least as many parameters
-and more blocks than the little model. The final independent cascades are ranked
-and selected from these feasible pairs. This means that a high-accuracy 85K big
-model is not discarded simply because it cannot pair with a 30K little model; it
-can still be selected if it forms a valid cascade with a smaller little model.
+The independent baseline tests whether joint pair search adds value beyond
+searching two good standalone models. Little and big architectures are
+optimised in \emph{two} separate NSGA-II searches against the same CNN
+search space (Table~\ref{tab:search-space}) and role-specific parameter
+ranges (Table~\ref{tab:search-constraints}). Each search optimises
+standalone validation accuracy against parameter count, since cascade
+routing does not yet exist at this stage and expected cascade MACs cannot
+be computed. The two
+role-specific Pareto fronts are then combined \emph{post hoc} by
+enumerating all little-Pareto $\times$ big-Pareto pairings, applying the
+pair-level feasibility checks (combined parameter budget, deployment-memory
+cap, role-order rules), and selecting the highest-scored feasible pairs.
+Enumerating after the role-specific searches, rather than fixing the
+best-of-role models, ensures that an 85K big model that cannot pair with a
+30K little model is not discarded simply on those grounds: it can still be
+selected if it forms a valid cascade with a smaller little model.
 
-The baseline is matched to the joint search where this is meaningful: it uses
-the same CNN search space, seed, proxy-training duration, threshold sweep, and
-deployment constraints. It is intentionally not identical in objective, because
-its purpose is to test whether standalone little and big models are sufficient,
-or whether searching the two roles together under a cascade objective adds
-value. The combined independent pairs are retrained and evaluated using the
-same threshold sweep as the joint candidates.
+The baseline is matched to the joint search wherever this is meaningful: it
+shares the CNN search space, the random seed, the proxy-training duration,
+the final threshold sweep, and the deployment constraints. It deliberately
+does not share the search objective, because the purpose of the baseline is
+to test whether independently strong models are sufficient.
+Figure~\ref{fig:search-pipeline} contrasts the two pipelines: joint NAS
+evaluates pairs as cascades during search, whereas the independent baseline
+delays cascade construction until after the two role-specific searches
+finish.
 
-Figure~\ref{fig:search-pipeline} summarizes the two design pipelines. The joint
-pipeline evaluates little-big pairs during search, while the independent
-baseline delays cascade construction until after the separate role-specific
-searches have finished.
+\label{sec:methodology:baseline}
 
 \begin{figure*}[t]
 \centering
-\resizebox{0.95\textwidth}{!}{%
+\resizebox{0.98\textwidth}{!}{%
 \begin{tikzpicture}[
-    node distance=0.85cm and 0.7cm,
+    node distance=0.85cm and 0.55cm,
     stage/.style={
         draw,
         rounded corners,
         align=center,
-        minimum width=2.7cm,
-        minimum height=0.85cm
+        minimum width=2.6cm,
+        minimum height=1.0cm,
+        font=\small
     },
+    sample/.style={stage, fill=blue!12, draw=blue!55!black},
+    check/.style={stage, fill=orange!22, draw=orange!65!black},
+    train/.style={stage, fill=green!16, draw=green!55!black},
+    eval/.style={stage, fill=violet!16, draw=violet!55!black},
     labelbox/.style={
         align=right,
         font=\bfseries,
-        minimum width=2.1cm
+        minimum width=2.0cm
     },
     arrow/.style={-{Latex[length=2mm]}, thick}
 ]
 \node[labelbox] (jointlabel) {Joint\\co-search};
-\node[stage, right=of jointlabel] (jsample) {Sample\\cascade pair};
-\node[stage, right=of jsample] (jcheck) {Feasibility\\check};
-\node[stage, right=of jcheck] (jproxy) {Proxy train\\pair};
-\node[stage, right=of jproxy] (jeval) {Cascade eval\\at $\tau=0.70$};
-\node[stage, right=of jeval] (jfront) {Pareto front\\accuracy/FLOPs};
-\node[stage, right=of jfront] (jselect) {Select\\A1-A3};
-\node[stage, right=of jselect] (jretrain) {Retrain\\C1-C4};
+\node[sample, right=of jointlabel] (jsample) {\textbf{J1.} Sample\\cascade pair};
+\node[check, right=of jsample] (jcheck) {\textbf{J2.} Feasibility\\check};
+\node[train, right=of jcheck] (jproxy) {\textbf{J3.} Proxy train\\pair (5 ep.)};
+\node[eval, right=of jproxy] (jeval) {\textbf{J4.} Cascade eval\\at $\tau=0.70$};
+\node[eval, right=of jeval] (jfront) {\textbf{J5.} Pareto front\\acc.\ vs MACs};
+\node[eval, right=of jfront] (jselect) {\textbf{J6.} Select\\A1--A3};
+\node[train, right=of jselect] (jretrain) {\textbf{J7.} Retrain\\C1--C4 (50 ep.)};
 
 \node[labelbox, below=1.25cm of jointlabel] (indlabel) {Independent\\baseline};
-\node[stage, right=of indlabel] (isample) {Search little\\standalone};
-\node[stage, right=of isample] (isampleb) {Search big\\standalone};
-\node[stage, right=of isampleb] (ifronts) {Role-specific\\Pareto fronts};
-\node[stage, right=of ifronts] (icombine) {Combine\\pairs};
-\node[stage, right=of icombine] (icheck) {Feasibility\\check};
-\node[stage, right=of icheck] (itrain) {Train combined\\pairs};
-\node[stage, right=of itrain] (isweep) {Threshold\\sweep};
+\node[sample, right=of indlabel] (isample) {\textbf{I1.} Search little\\standalone};
+\node[sample, right=of isample] (isampleb) {\textbf{I2.} Search big\\standalone};
+\node[eval, right=of isampleb] (ifronts) {\textbf{I3.} Role-specific\\Pareto fronts};
+\node[eval, right=of ifronts] (icombine) {\textbf{I4.} Combine\\pairs};
+\node[check, right=of icombine] (icheck) {\textbf{I5.} Feasibility\\check};
+\node[train, right=of icheck] (itrain) {\textbf{I6.} Train combined\\pairs (50 ep.)};
+\node[eval, right=of itrain] (isweep) {\textbf{I7.} Threshold\\sweep};
 
 \draw[arrow] (jsample) -- (jcheck);
 \draw[arrow] (jcheck) -- (jproxy);
@@ -674,26 +837,38 @@ searches have finished.
 \draw[arrow] (itrain) -- (isweep);
 \end{tikzpicture}%
 }
-\caption{Comparison of the joint co-search pipeline and the independent NAS
-baseline. Joint NAS searches full cascade pairs directly, whereas the
-independent baseline searches the two roles separately and only later assembles
-cascade pairs.}
+\caption{Joint co-search pipeline (top, J1-J7) versus the independent NAS
+baseline (bottom, I1-I7). Stages are coloured by type: blue = sample /
+search, orange = feasibility filter, green = training (proxy or final),
+violet = evaluation, frontier, and selection. The joint pipeline sees the
+cascade as a coupled object from J3 onward, whereas the independent
+baseline does not assemble cascade pairs until I4. The text in
+Sections~\ref{sec:methodology:joint} and~\ref{sec:methodology:baseline}
+refers to these step labels.}
 \label{fig:search-pipeline}
 \end{figure*}
 
 \subsection{Cascade-Aware Loss}
+\label{sec:methodology:loss}
 
-We introduce a cascade-aware retraining loss that keeps standard classification terms, but also reflects how the cascade is used at inference time. In this work, \emph{co-training} means jointly optimizing the little and big models in the same cascade pair with a shared loss. It does not refer to semi-supervised co-training with separate data views. The key idea is to replace the hard routing decision in Figure~\ref{fig:cascade-routing} with a differentiable approximation during training. Figure~\ref{fig:cotraining-loss-flow} shows how the loss is constructed from the two model outputs and the soft routing probability.
-
-First, we compute the little model's confidence:
-\[
-c_l = \max(\mathrm{softmax}(z_l)),
-\]
-where $z_l$ are the little-model logits. Instead of directly applying the hard rule $c_l > \tau$, we define a soft exit probability:
-\[
-p_{\mathrm{exit}} = \sigma(k(c_l-\tau)),
-\]
-where $\tau$ is the routing threshold, $k$ controls how sharp the soft decision is, and $\sigma$ is the sigmoid function. If the little model is confident, $p_{\mathrm{exit}}$ becomes close to 1. If it is uncertain, $p_{\mathrm{exit}}$ becomes close to 0.
+We use a cascade-aware retraining loss that keeps standard classification
+terms but reflects how the cascade routes samples at inference time. We use
+\emph{co-training} in the sense of jointly optimising the little and big
+models with a shared loss, which is unrelated to semi-supervised
+co-training.
+The hard routing decision (Eq.~\ref{eq:max-softmax}) is replaced during
+training by a differentiable soft exit probability
+\begin{equation}
+p_{\mathrm{exit}} = \sigma\bigl(k\,(c_l-\tau)\bigr),
+\label{eq:soft-exit}
+\end{equation}
+where $\sigma$ is the sigmoid function and $k$ is a routing sharpness
+parameter. Large $k$ makes the soft decision approach the hard threshold
+rule, while small $k$ smooths it out. We use $k=20$, which gives
+$p_{\mathrm{exit}}\approx 1$ for $c_l\gtrsim 0.85$ and $p_{\mathrm{exit}}
+\approx 0$ for $c_l\lesssim 0.55$ at $\tau=0.70$; this is sharp enough to
+behave like the inference-time threshold for most samples while keeping a
+small interval of gradient flow around $\tau$.
 
 \begin{figure}[t]
 \centering
@@ -708,6 +883,9 @@ where $\tau$ is the routing threshold, $k$ controls how sharp the soft decision 
         minimum height=0.78cm,
         inner sep=3pt
     },
+    context/.style={box, fill=violet!8, draw=violet!55!black},
+    highbox/.style={box, fill=green!12, draw=green!50!black},
+    lowbox/.style={box, fill=orange!14, draw=orange!65!black},
     header/.style={
         draw,
         rounded corners,
@@ -717,22 +895,24 @@ where $\tau$ is the routing threshold, $k$ controls how sharp the soft decision 
         minimum height=0.75cm,
         inner sep=3pt
     },
+    highheader/.style={header, fill=green!18, draw=green!55!black},
+    lowheader/.style={header, fill=orange!20, draw=orange!70!black},
     arrow/.style={-{Latex[length=2mm]}, thick}
 ]
-\node[box, text width=5.5cm] (batch) {During training, the hard exit rule is replaced by a soft exit probability.};
-\node[header, below left=0.65cm and 0.05cm of batch] (highh) {High confidence\\example};
-\node[header, below right=0.65cm and 0.05cm of batch] (lowh) {Low confidence\\example};
+\node[context, text width=5.5cm] (batch) {During training, the hard exit rule is replaced by a soft exit probability.};
+\node[highheader, below left=0.65cm and 0.05cm of batch] (highh) {High confidence\\example};
+\node[lowheader, below right=0.65cm and 0.05cm of batch] (lowh) {Low confidence\\example};
 
-\node[box, below=of highh] (highc) {$c_l=0.90>\tau$};
-\node[box, below=of lowh] (lowc) {$c_l=0.45<\tau$};
-\node[box, below=of highc] (highp) {$p_{\mathrm{exit}}\approx 1$};
-\node[box, below=of lowc] (lowp) {$p_{\mathrm{exit}}\approx 0$};
-\node[box, below=of highp] (highloss) {Little CE gets higher weight};
-\node[box, below=of lowp] (lowloss) {Big CE gets higher weight};
-\node[box, below=of highloss] (highpen) {Wrong-exit penalty if little is wrong};
-\node[box, below=of lowloss] (lowpen) {Defer cost grows when confidence is low};
-\node[box, below=of highpen] (higheffect) {Encourages correct early exits};
-\node[box, below=of lowpen] (loweffect) {Trains big model on hard samples};
+\node[highbox, below=of highh] (highc) {$c_l=0.90>\tau$};
+\node[lowbox, below=of lowh] (lowc) {$c_l=0.45<\tau$};
+\node[highbox, below=of highc] (highp) {$p_{\mathrm{exit}}\approx 1$};
+\node[lowbox, below=of lowc] (lowp) {$p_{\mathrm{exit}}\approx 0$};
+\node[highbox, below=of highp] (highloss) {Little CE gets higher weight};
+\node[lowbox, below=of lowp] (lowloss) {Big CE gets higher weight};
+\node[highbox, below=of highloss] (highpen) {Wrong-exit penalty if little is wrong};
+\node[lowbox, below=of lowloss] (lowpen) {Defer cost grows when confidence is low};
+\node[highbox, below=of highpen] (higheffect) {Encourages correct early exits};
+\node[lowbox, below=of lowpen] (loweffect) {Trains big model on hard samples};
 
 \draw[arrow] (batch) -- (highh);
 \draw[arrow] (batch) -- (lowh);
@@ -748,60 +928,61 @@ where $\tau$ is the routing threshold, $k$ controls how sharp the soft decision 
 \draw[arrow] (lowpen) -- (loweffect);
 \end{tikzpicture}%
 }
-\caption{Behavioral view of the cascade-aware loss. High-confidence samples are
-treated as likely early exits, while low-confidence samples are treated as
-likely deferrals. The soft exit probability shifts the learning emphasis between
-the little and big models.}
+\caption{Behavioral view of the cascade-aware loss. Green shows the
+high-confidence path, where samples are treated as likely early exits; orange
+shows the low-confidence path, where samples are treated as likely deferrals.
+The soft exit probability shifts the learning emphasis between the little and
+big models.}
 \label{fig:cotraining-loss-flow}
 \end{figure}
 
-As illustrated in Figure~\ref{fig:cotraining-loss-flow}, a high-confidence
-little prediction is treated as a likely early exit, so the little-model CE term
-is emphasized. A low-confidence little prediction is treated as a likely
-deferral, so the big-model CE term is emphasized. The routing terms are small
-regularizers rather than the main training signal: they encourage the cascade
-to avoid deferring every sample, while also discouraging confident wrong
-little-model exits.
-
-The full cascade-aware loss is:
-\[
+The full cascade-aware loss has four terms:
+\begin{equation}
 \begin{aligned}
 \mathcal{L}_{\mathrm{cascade}}
-={}& (p_{\mathrm{exit}}+\lambda_l)\mathrm{CE}(z_l,y) \\
-&+ (1-p_{\mathrm{exit}}+\lambda_b)\mathrm{CE}(z_b,y) \\
-&+ \lambda_d(1-p_{\mathrm{exit}}) \\
-&+ \lambda_w p_{\mathrm{exit}}
-   \mathbf{1}[\hat{y}_l \neq y].
+={}& \underbrace{(p_{\mathrm{exit}}+\lambda_l)\,\mathrm{CE}(z_l,y)}_{\text{little CE, routed}} \\
+&+ \underbrace{(1-p_{\mathrm{exit}}+\lambda_b)\,\mathrm{CE}(z_b,y)}_{\text{big CE, routed}} \\
+&+ \underbrace{\lambda_d\,(1-p_{\mathrm{exit}})}_{\text{defer cost}}
++ \underbrace{\lambda_w\,p_{\mathrm{exit}}\,\mathbf{1}[\hat{y}_l \neq y]}_{\text{wrong-exit penalty}}.
 \end{aligned}
-\]
+\label{eq:cascade-loss}
+\end{equation}
+The first two CE terms emphasise the little (resp.\ big) model on samples
+likely to exit (resp.\ defer); the constants $\lambda_l$ and $\lambda_b$
+keep a small training signal flowing to both models even when the soft
+routing weight is near zero. The third term is a small defer cost that
+prevents the optimiser from sending every sample to the big model, which
+would maximise accuracy but eliminate the cascade's compute saving. The
+fourth term penalises confident wrong exits, the failure mode that
+directly hurts a threshold-routed cascade. The routing-related terms are
+deliberately small relative to the CE terms. Large values dominate the
+classification objective and produce miscalibrated branches.
+Figure~\ref{fig:cotraining-loss-flow} illustrates these effects for
+high-confidence and low-confidence samples.
 
-The first term trains the little model. It is weighted by the soft exit probability because the little model is responsible for samples likely to exit early. The auxiliary weight $\lambda_l$ ensures that the little model still receives a stable classification signal even for samples that are likely to be deferred.
-
-The second term trains the big model. It is weighted by $1-p_{\mathrm{exit}}$, so the big model is trained more strongly on samples that the little model is likely to defer. The optional auxiliary weight $\lambda_b$ keeps a small constant big-model training signal even for samples that are likely to exit early.
-
-The third term, $\lambda_d(1-p_{\mathrm{exit}})$, is a small defer cost. It discourages the system from sending every sample to the big model, which would increase accuracy but destroy the FLOPs benefit of the cascade. This weight is kept small because the model should not be forced to exit when the little model is genuinely uncertain; if the penalty is too large, it can dominate the classification objective and encourage harmful early exits.
-
-The final term, $\lambda_w p_{\mathrm{exit}}\mathbf{1}[\hat{y}_l \neq y]$, penalizes confident wrong exits. This is the most cascade-specific part: it targets the harmful case where the little model would accept a sample even though its prediction is wrong. Like the defer cost, it is used as a regularizer so that the classification losses remain the dominant optimization signal; overly large values could reduce branch accuracy or calibration instead of improving cascade behavior.
-
-Overall, the loss tries to balance three goals: keep the little model accurate, keep the big model useful for deferred samples, and encourage early exits only when they are likely to be correct. In the final C3 and C4 experiments we use routing sharpness $k=20$, $\lambda_l=0.75$, $\lambda_b=0.05$, $\lambda_d=0.0125$, and $\lambda_w=0.075$. C3 uses no label smoothing, while C4 uses label smoothing of 0.1.
+We use $\lambda_l=0.75$, $\lambda_b=0.05$, $\lambda_d=0.0125$, and
+$\lambda_w=0.075$ throughout. These values were selected by manual
+calibration on the CIFAR-10 validation split rather than by a full sweep:
+$\lambda_l$ is the largest so that the little branch always receives a
+classification signal; $\lambda_b$ is smaller because the big branch is
+mostly trained on deferred samples already; $\lambda_d$ and $\lambda_w$ are
+small enough to act as routing-aware regularisers without dominating the CE
+terms. A systematic sensitivity sweep is left to future work
+(\S\ref{sec:future-work}).
 
 \subsection{Retraining Loss Ablations}
+\label{sec:methodology:loss-ablations}
 
-For RQ2, the selected joint-NAS architectures are retrained from scratch under
-the four loss settings summarized in
-Table~\ref{tab:retraining-loss-ablations}. This isolates whether improvements
-come from standard cross-entropy, label smoothing, the proposed cascade-aware
-loss, or the combination of cascade-aware loss and smoothing. CE is used as the
-default baseline because it is the common supervised classification objective
-for multi-class neural networks \cite{goodfellow2016deeplearning} and is widely
-used as a baseline in CIFAR-style image-classification experiments
-\cite{zhang2018gce}. It directly optimizes branch prediction accuracy without
-adding cascade-specific assumptions. Label smoothing is included because
-cascade routing depends on confidence, and smoothing is a simple
-calibration-oriented baseline for testing whether less overconfident branch
-predictions improve routing. The comparison is performed after architecture
-selection, so RQ2 evaluates the retraining objective rather than the NAS search
-itself.
+For RQ2, the three selected joint-NAS architectures are retrained from
+scratch under the four loss settings of
+Table~\ref{tab:retraining-loss-ablations}. The ablation isolates whether
+improvements come from standard cross-entropy (C1), label smoothing (C2),
+the cascade-aware loss (C3), or its combination with label smoothing (C4).
+CE is the default baseline because it is the standard supervised
+classification objective \cite{goodfellow2016deeplearning,zhang2018gce}.
+Label smoothing is included because cascade routing depends on confidence,
+and smoothing is a simple calibration-oriented baseline
+\cite{mueller2019labelsmoothing,guo2017calibration}.
 
 \begin{table}[H]
 \centering
@@ -825,79 +1006,82 @@ C4 & Cascade-aware loss + label smoothing \\
 
 \subsection{Datasets}
 
-All experiments use CIFAR-10 \cite{krizhevsky2009cifar}. We use the official
-CIFAR-10 training split for training and validation, with a deterministic 45K/5K
-split: the first 5K images are used for validation and the remaining 45K images
-are used for training. The official 10K CIFAR-10 test split is kept separate and
-is used only for final threshold-sweep evaluation after retraining. CIFAR-10 is
-small enough to support repeated NAS proxy training and ablation runs, while
-still being non-trivial for confidence-based routing and calibration analysis.
+All experiments use CIFAR-10 \cite{krizhevsky2009cifar}, a 10-class
+$32\times 32$ image classification dataset with 50K training and 10K test
+images. We use a deterministic 45K/5K split of the training set: approximately 500 images
+per class (Figure \ref{fig:cifar10_validation_split}) are held out for validation and the remaining 45K are used for
+training. Table~\ref{tab:retraining-loss-ablations};
+\begin{figure}[t]
+\centering
+\resizebox{\columnwidth}{!}{%
+\begin{tikzpicture}
+    % Axes
+    \draw[->] (0,0) -- (8.4,0) node[right] {\scriptsize Class};
+    \draw[->] (0,0) -- (0,6.0) node[above] {\scriptsize Images};
 
-The training split uses random crop with padding 4, random horizontal flipping,
-conversion to tensor, and CIFAR-10 normalization. The validation and test splits
-use only tensor conversion and the same normalization. The validation split is
-used during proxy NAS evaluation and joint-retraining checkpoint selection. The
-test split is not used for architecture selection.
+    % Y-axis ticks
+    \foreach \y in {0,100,200,300,400,500} {
+        \pgfmathsetmacro{\yy}{\y/100}
+        \draw (-0.08,\yy) -- (0,\yy);
+        \node[left, font=\scriptsize] at (-0.08,\yy) {\y};
+        \draw[gray!20] (0,\yy) -- (8.1,\yy);
+    }
 
-\subsection{Baselines}
+    % Bars: class / count / x-position
+    \foreach \cls/\n/\x in {
+        airplane/505/0.3,
+        automobile/460/1.1,
+        bird/519/1.9,
+        cat/486/2.7,
+        deer/519/3.5,
+        dog/488/4.3,
+        frog/519/5.1,
+        horse/486/5.9,
+        ship/520/6.7,
+        truck/498/7.5
+    } {
+        \pgfmathsetmacro{\h}{\n/100}
+        \draw[fill=blue!55, draw=black] (\x,0) rectangle ++(0.45,\h);
+        \node[above, font=\scriptsize] at (\x+0.225,\h) {\n};
+        \node[rotate=45, anchor=east, font=\scriptsize] at (\x+0.225,-0.15) {\cls};
+    }
 
-RQ1 compares two architecture-design procedures. The first is joint co-search,
-where NSGA-II searches complete little-big cascade pairs and evaluates them
-directly as cascades. The second is an independent NAS baseline, where the
-little and big architectures are searched separately and then combined after the
-two searches. Both approaches use the CNN search space in
-Table~\ref{tab:search-space}, the same random seed, the same proxy-training
-duration, and the same final threshold sweep.
+    % Ideal balanced reference line
+    \draw[red, dashed, thick] (0,5.0) -- (8.1,5.0);
+    \node[right, red, font=\scriptsize] at (8.1,5.0) {500};
+\end{tikzpicture}%
+}
+\caption{Class distribution of the first 5,000 CIFAR-10 training images used as the validation split.}
+\label{fig:cifar10_validation_split}
+\end{figure}
 
-This comparison should be interpreted as an end-to-end cascade-design
-comparison rather than a perfectly isolated test of architecture search alone.
-The joint pipeline searches complete cascade pairs and uses cascade-aware pair
-training during proxy evaluation, while the independent baseline searches the
-two roles as standalone classifiers and trains the combined models
-independently with CE. Therefore, any RQ1 improvement reflects the combined
-effect of joint pair selection, cascade-aware proxy training, and matched
-resource constraints.
+The official 10K test split is kept untouched and used only for
+the final threshold-sweep evaluation. CIFAR-10 is small enough to support
+repeated NAS proxy training and ablation runs while remaining non-trivial
+for confidence-based routing and calibration analysis. Training uses
+random crop with 4-pixel padding and random horizontal flipping, followed
+by CIFAR-10 normalisation; validation and test use the same normalisation
+without augmentation.
 
-The joint search uses a population size of 20 for 20 generations. The
-independent baseline uses a population size of 20 for 10 generations for each
-role-specific search. Since it runs one little-model search and one big-model
-search, this gives the independent baseline approximately the same number of
-proxy-trained candidates as the joint search. This matches the
-proxy-evaluation budget more closely than the evolutionary depth per role:
-joint NAS evolves complete little-big pairs for 20 generations, while each
-independent role is evolved for 10 generations because the two searches are run
-sequentially and were substantially more time-consuming in practice. During
-search, joint candidates are evaluated at the fixed routing threshold
-$\tau=0.70$. Independent candidates are searched as standalone classifiers using
-CE and optimized for validation accuracy against parameter count. Parameter
-count is used here because the models are searched before a cascade route
-exists, so expected cascade FLOPs are not yet defined. After the two
-role-specific searches finish, the independent baseline combines the resulting
-Pareto fronts by enumerating all little-big pairs, rejecting pairs that violate
-the combined parameter budget, deployment-memory budget, or role-order rules,
-and selecting the highest-scored feasible cascade pairs. The selected little
-and big architectures are then trained as separate CE classifiers for 50
-epochs; no cascade-aware shared loss is applied to the independent baseline.
-They are only coupled during final evaluation, where the little model's
-confidence threshold determines whether an input exits early or defers to the
-big model. After combination, the independent cascades are evaluated with the
-same threshold sweep and cascade-FLOPs metric as the joint method. Some RQ1
-plots use the C4 joint retrain directory to show the high-accuracy end of the
-joint ablation against the independently searched cascades, while the separate
-C1-C4 comparison in RQ2 reports how the final retraining loss changes
-accuracy, routing, and expected FLOPs for the same selected joint architectures.
+\subsection{Training Schedule}
 
-For RQ2, the selected joint-NAS architectures are retrained under the four loss
-conditions in Table~\ref{tab:retraining-loss-ablations}. Each condition retrains
-the same three selected architectures, so the ablation compares retraining
-objectives rather than different architecture selections. Retraining starts
-from scratch rather than continuing from proxy-trained weights. This separates
-the short proxy phase, which is used only to choose architectures, from the
-longer final training phase used for reported results. The 50-epoch retraining
-budget is long enough to obtain reasonably stable comparisons, with smaller
-improvements expected in later epochs; a longer schedule such as 100 epochs
-would likely be more precise, but was not used because of the total compute cost
-of retraining multiple architectures under multiple loss settings.
+The training schedule is summarised in Table~\ref{tab:experimental-schedule}.
+The joint search uses a population of 20 for 20 generations; the independent
+baseline uses 20 for 10 generations \emph{per role}, since it runs one
+little-model and one big-model search sequentially. This gives the two
+methods approximately the same number of proxy-trained candidates (the
+quantity that dominates compute cost), even though the evolutionary depth
+per role differs. The independent baseline does not use the cascade-aware
+shared loss: it trains the selected little and big architectures as
+standalone CE classifiers, and the two are coupled only at evaluation via
+the threshold router.
+
+Retraining starts from scratch under each of the four C1-C4 conditions in
+Table~\ref{tab:retraining-loss-ablations}; proxy-trained weights are not
+re-used. The 50-epoch retraining budget is the longest schedule we could
+afford across all variants given the total compute budget. Many CIFAR-style
+setups train for 100-200 epochs; we discuss the implications of the
+shorter schedule in Section~\ref{sec:future-work}.
 
 \begin{table}[t]
 \centering
@@ -914,7 +1098,7 @@ Proxy training & Epochs / batch size & 5 / 128 \\
 Proxy training & Optimizer & SGD, lr 0.05 \\
 Joint C1-C4 retraining & Epochs / batch size & 50 / 128 \\
 Joint C1-C4 retraining & Optimizer & SGD, lr 0.1 \\
-Joint C1-C4 retraining & Scheduler & Cosine annealing \\
+Joint C1-C4 retraining & Scheduler & Cosine annealing \cite{loshchilov2017sgdr} \\
 Independent final training & Epochs / learning rate & 50 / 0.05 \\
 All final training & Momentum / weight decay & 0.9 / $5\cdot10^{-4}$ \\
 Threshold sweep & Thresholds & 0.50, 0.60, 0.70, 0.80, 0.90, 0.95 \\
@@ -924,50 +1108,34 @@ Threshold sweep & Thresholds & 0.50, 0.60, 0.70, 0.80, 0.90, 0.95 \\
 
 \subsection{Evaluation Metrics}
 
-The primary metrics are cascade accuracy and expected cascade FLOPs. Cascade
-accuracy is the accuracy after applying the threshold router: samples above the
-threshold use the little prediction, while deferred samples use the big
-prediction. Expected cascade FLOPs are computed analytically as
-$F_l+(1-\rho)F_b$, where $\rho$ is the measured exit ratio.
+The primary metrics are cascade accuracy and expected cascade MACs (the cost
+model defined in Eq.~\ref{eq:cascade-cost}). Secondary metrics are the exit
+ratio $\rho$, the standalone little- and big-model accuracies, parameter
+count, and the float32 deployment-memory estimate (both models' weights plus
+the input buffer plus the larger of the two peak activation footprints,
+since the two models are evaluated sequentially). All analytical metrics
+support NAS selection and the main accuracy-compute comparisons.
+Measured Pico 2 latency and TFLM arena sizes are reported separately
+(Section~\ref{sec:results:pico}).
 
-We also report exit ratio, little-model accuracy, big-model accuracy, parameter
-count, and estimated deployment memory. Deployment memory is estimated in
-float32 and includes both models' weights, the input buffer, and the larger peak
-activation footprint of the two sequential paths. FLOPs are reported as MACs
-and are estimated analytically from the selected architectures. These analytical
-metrics are used for NAS selection and the main accuracy-compute comparisons;
-measured Pico 2 latency is reported separately in the deployment evaluation.
-
-For routing and calibration analysis, we report little-model ECE and routing
-error rate. ECE is computed with 15 confidence bins using the little model's
-maximum softmax confidence. Routing error rate is the fraction of test samples
-where the cascade exits at the little model, the little prediction is wrong, and
-the big model would have been correct. This captures the specific failure mode
-caused by a confident wrong early exit.
-
-Proxy-search results and final retrained results are treated separately. A
-proxy result is a validation metric measured after short 5-epoch training and is
-used only for architecture selection. Proxy Pareto fronts therefore summarize
-which candidates looked promising under the cheap search budget. Final figures
-and comparisons use retrained checkpoints and test-set threshold sweeps, so
-final claims are not based on the proxy-search validation scores.
+For routing and calibration we report the little-model ECE
+(Section~\ref{sec:background:ece}) and the \emph{routing error rate}, the
+fraction of test samples on which the cascade exits at the little model with
+a wrong prediction even though the big model would have been correct. This
+captures the failure mode that directly hurts a threshold-routed cascade.
+Proxy-search and final-retrained results are reported separately: proxy
+metrics are 5-epoch validation accuracies used only for architecture
+selection, whereas final claims use 50-epoch retrained test-set
+threshold-sweep results.
 
 \subsection{Implementation Details}
 
-All experiments are implemented in PyTorch and executed through a scripted
-pipeline that runs joint NAS, independent NAS, retraining, metric aggregation,
-and plot generation. CUDA is used when available, and CPU execution is used
-otherwise.
-
-All CIFAR-10 experiments use seed 42. The implementation seeds Python, NumPy,
-PyTorch, CUDA when available, NSGA-II, feasible sampling and repair, and
-DataLoader shuffling. Search candidates are proxy-trained for 5 epochs, while
-final selected architectures are retrained from scratch for 50 epochs.
-
-Experiment outputs are stored as CSV files, including search logs, Pareto
-fronts, selected architectures, training curves, and per-threshold test sweeps.
-All plots and analysis are generated from these saved outputs, so the reported
-figures can be reproduced without re-running model training.
+All experiments are implemented in PyTorch through a scripted pipeline that
+runs joint NAS, independent NAS, retraining, metric aggregation, and plot
+generation. CUDA is used when available, CPU otherwise. All experiments use
+random seed 42, which is propagated to Python, NumPy, PyTorch, CUDA, the
+NSGA-II implementation, feasible-sampling and repair operators, and
+DataLoader shuffling. Experiment outputs are saved as CSV files, including search logs, Pareto fronts, selected architectures, training curves, and threshold sweeps. The reported results tables and figures are generated from these files, allowing the results to be recomputed without retraining.
 
 \subsection{Pico 2 Deployment Test Setup}
 
@@ -985,7 +1153,7 @@ Pico one sample at a time. This allowed the full 10,000-image CIFAR-10 test set
 to be evaluated without storing the entire dataset in Pico flash. For each
 sample, the Pico reported the predicted class, route decision, correctness,
 little-model time, big-model time when used, total cascade time, and analytical
-FLOP counts for the selected path. This is the source of the deployment latency
+MAC counts for the selected path. This is the source of the deployment latency
 and route-split results reported in Table~\ref{tab:pico-deployment}.
 
 Second, a route-aware energy test was run on a 1,000-image embedded CIFAR-10
@@ -1000,15 +1168,16 @@ big-model execution. This setup separates idle time from the active inference
 window and records whether each measured inference used the little path or the
 deferred path.
 
-\begin{figure}[H]
+\begin{figure*}[t]
 \centering
-\includegraphics[width=\columnwidth]{pico_uno_energy_fritzing_diagram.png}
+\includegraphics[width=0.90\textwidth]{pico_uno_energy_fritzing_diagram.png}
 \caption{Route-aware Pico 2 energy measurement setup using a 10~$\Omega$
 high-side shunt, GP18 inference trigger, and GP19 route signal.}
 \label{fig:pico-energy-setup}
-\end{figure}
+\end{figure*}
 
 % ============================================================================
+
 \section{Results}
 \label{sec:results}
 
@@ -1020,7 +1189,7 @@ the generated figures.
 \subsection{RQ1: Joint Co-Search vs.\ Independent NAS}
 
 Table~\ref{tab:rq1-results} summarizes the final joint and independent cascade
-results. The joint co-search pipeline occupies a stronger accuracy-FLOPs
+results. The joint co-search pipeline occupies a stronger accuracy-MACs
 region than the independent baseline. C3 is the cheaper cascade-aware variant, reaching
 79.69\% mean test accuracy at 1.67M average cascade MACs, while C4 reaches the
 highest mean accuracy, 80.69\%, at a higher 2.08M average cascade MACs. The
@@ -1032,21 +1201,21 @@ less expected compute than the independent baseline.
 \begin{table}[t]
 \centering
 \caption{RQ1 test-set comparison at $\tau=0.70$. Values are averaged across the
-selected retrained cascades. C1-C4 share the same co-searched architectures
-but differ in retraining loss, while the independent baseline is searched and
-combined separately.}
+three selected retrained cascades. C1-C4 share the same co-searched
+architectures but differ in retraining loss. The independent baseline is
+searched and combined separately. ECE is Expected Calibration Error
+(\S\ref{sec:background}); lower is better.}
 \label{tab:rq1-results}
-\small
+\footnotesize
 \begin{tabular}{@{}lrrrr@{}}
 \toprule
-\textbf{Method} & \textbf{Acc.} & \textbf{Exit} & \textbf{FLOPs} & \textbf{ECE} \\
- & \textbf{(\%)} & \textbf{ratio} & \textbf{(M MACs)} & \\
+\textbf{Method}      & \textbf{Acc.\ (\%)} & \textbf{Exit ratio} & \textbf{MACs (M)} & \textbf{ECE} \\
 \midrule
-Joint NAS C1 & 79.64 & 0.55 & 1.69 & 0.0104 \\
-Joint NAS C2 & 80.33 & 0.43 & 2.01 & 0.0811 \\
-Joint NAS C3 & 79.69 & 0.55 & 1.67 & 0.0104 \\
-Joint NAS C4 & 80.69 & 0.40 & 2.08 & 0.0850 \\
-Independent NAS & 74.03 & 0.57 & 2.22 & 0.0508 \\
+Joint NAS C1         & 79.64 & 0.55 & 1.69 & 0.0104 \\
+Joint NAS C2         & 80.33 & 0.43 & 2.01 & 0.0811 \\
+Joint NAS C3         & 79.69 & 0.55 & 1.67 & 0.0104 \\
+Joint NAS C4         & 80.69 & 0.40 & 2.08 & 0.0850 \\
+Independent NAS      & 74.03 & 0.57 & 2.22 & 0.0508 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1068,7 +1237,7 @@ independently searched cascades at the fixed operating threshold $\tau=0.70$.
 The plot uses the C4 retraining condition to show the high-accuracy end of the
 joint ablation, not to define C4 as the single canonical joint result. The left
 panel compares combined parameter count against cascade accuracy, while the
-right panel compares expected cascade FLOPs against cascade accuracy.}
+right panel compares expected cascade MACs against cascade accuracy.}
 \label{fig:rq1-joint-independent}
 \end{figure*}
 
@@ -1077,7 +1246,7 @@ right panel compares expected cascade FLOPs against cascade accuracy.}
 Table~\ref{tab:rq2-results} reports the retraining-loss ablation for the same
 three joint-NAS architectures. C1 and C3 compare CE against the cascade-aware
 loss without label smoothing. Their average cascade accuracies are close, but
-C3 slightly improves over C1 while also reducing expected FLOPs: C1 obtains
+C3 slightly improves over C1 while also reducing expected MACs: C1 obtains
 79.64\% at 1.69M MACs, while C3 obtains 79.69\% at 1.67M MACs. This is not a
 large standalone win, but it shows that the cascade-aware loss can move the
 operating point in the intended direction.
@@ -1085,18 +1254,19 @@ operating point in the intended direction.
 \begin{table}[t]
 \centering
 \caption{RQ2 retraining-loss ablation at $\tau=0.70$. Values are averaged over
-the same three selected joint architectures.}
+the three selected joint architectures (A1, A2, A3).}
 \label{tab:rq2-results}
-\small
+\scriptsize
+\setlength{\tabcolsep}{4pt}
 \begin{tabular}{@{}lrrrr@{}}
 \toprule
-\textbf{Variant} & \textbf{Acc.} & \textbf{Exit} & \textbf{FLOPs} & \textbf{Route err.} \\
- & \textbf{(\%)} & \textbf{ratio} & \textbf{(M MACs)} & \\
+\textbf{Variant}          & \textbf{Acc.\ (\%)} & \textbf{Exit} & \textbf{MACs} & \textbf{Route err.} \\
+                          &                     & \textbf{ratio} & \textbf{(M)}  &                    \\
 \midrule
-C1: CE & 79.64 & 0.55 & 1.69 & 0.0231 \\
-C2: CE + smoothing & 80.33 & 0.43 & 2.01 & 0.0093 \\
-C3: Cascade loss & 79.69 & 0.55 & 1.67 & 0.0242 \\
-C4: Cascade + smoothing & 80.69 & 0.40 & 2.08 & 0.0083 \\
+C1: CE                    & 79.64 & 0.55 & 1.69 & 0.0231 \\
+C2: CE + smooth           & 80.33 & 0.43 & 2.01 & 0.0093 \\
+C3: Cascade loss          & 79.69 & 0.55 & 1.67 & 0.0242 \\
+C4: Cascade + smooth      & 80.69 & 0.40 & 2.08 & 0.0083 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1104,50 +1274,41 @@ C4: Cascade + smoothing & 80.69 & 0.40 & 2.08 & 0.0083 \\
 The smoothed variants, C2 and C4, achieve the highest average cascade
 accuracies. They also have substantially lower routing error rates than C1 and
 C3, but this comes with lower exit ratios and therefore higher expected
-cascade FLOPs. The results therefore show an accuracy-compute trade-off inside
-the ablation itself: C1 and C3 exit more often and are cheaper, while C2 and C4
-defer more samples and obtain higher accuracy. C4 is therefore the
-higher-accuracy, higher-compute variant, whereas C3 is the cheaper
-cascade-aware alternative. These trends are shown in
+cascade MACs. The ablation itself thus shows an accuracy-compute trade-off: C1 and C3 exit more often and are cheaper, while C2 and C4
+defer more samples and obtain higher accuracy. C4 is the higher-accuracy,
+higher-compute variant; C3 is the cheaper cascade-aware alternative. These trends are shown in
 Figure~\ref{fig:rq2-ablation}.
 
-\begin{figure*}[t]
+\begin{figure}[t]
 \centering
-\begin{minipage}{0.48\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{ablation_accuracy_summary.pdf}
-\end{minipage}
-\hfill
-\begin{minipage}{0.48\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{ablation_acc_vs_flops.pdf}
-\end{minipage}
-\caption{Retraining-loss ablation for the three selected joint architectures at
-$\tau=0.70$. C1 uses CE, C2 uses CE with label smoothing, C3 uses the
-cascade-aware loss, and C4 combines cascade-aware loss with label smoothing.
-The ablation shows that C3 slightly improves the CE operating point, while the
-strongest average accuracy and lowest routing error are associated with the
-smoothed variants.}
+\includegraphics[width=\columnwidth]{ablation_acc_vs_flops.pdf}
+\caption{Retraining-loss ablation for the three selected joint
+architectures at $\tau=0.70$, plotted in the accuracy-MACs plane. C1 uses
+CE, C2 uses CE with label smoothing, C3 uses the cascade-aware loss, and
+C4 combines cascade-aware loss with label smoothing. C3 marginally
+improves on the CE operating point of C1; the smoothed variants (C2, C4)
+sit higher on accuracy but also use more MACs because they defer more
+often.}
 \label{fig:rq2-ablation}
-\end{figure*}
+\end{figure}
 
-\subsection{RQ3: Threshold, Exit Ratio, and Routing}
+\subsection{Routing Behaviour and Threshold Sensitivity}
+\label{sec:results:routing}
 
-The threshold-based cascade does not depend only on the standalone accuracy of
-the little and big models. It also depends on how confidence separates safe
-little-model exits from samples that should defer to the big model. This is
-visible in the routing metrics. At $\tau=0.70$, C4 has a routing error rate of
-0.0083, while C1 and C3 have routing error rates of 0.0231 and 0.0242,
-respectively. Thus, the highest-accuracy variants also make fewer harmful early
-exit decisions.
+The two research questions concern \emph{which} architecture and \emph{which}
+loss to use at a single operating threshold. This subsection complements
+them by examining \emph{how} the selected joint cascades behave at the
+operating threshold and across a sweep of alternative thresholds.
 
-However, ECE and routing error do not move in the same direction. C1 and C3
-have lower little-model ECE than C2 and C4, but they also have higher routing
-error. This means that global calibration, as measured by ECE, is not
-sufficient to explain cascade quality. What matters for the threshold router is
-whether high-confidence little predictions are correct on the samples that exit
-early. Figure~\ref{fig:rq3-routing} illustrates this relationship between
-confidence quality, routing error, exit ratio, and cascade accuracy.
+At $\tau=0.70$, the routing-error rate of the C4 variant is 0.0083, against
+0.0231 and 0.0242 for C1 and C3 respectively (Table~\ref{tab:rq2-results}).
+The highest-accuracy variant also makes the fewest harmful early-exit
+decisions. ECE and routing error do not, however, move together:
+C1 and C3 have the lowest little-model ECE but the highest routing error.
+Global calibration is necessary but not sufficient to explain cascade
+quality. What matters for the threshold router is whether
+\emph{high-confidence} little predictions are correct on the samples that
+actually exit. Figure~\ref{fig:routing-diagnostics} shows this relationship.
 
 \begin{figure*}[t]
 \centering
@@ -1160,88 +1321,87 @@ confidence quality, routing error, exit ratio, and cascade accuracy.
     \centering
     \includegraphics[width=\linewidth]{accuracy_vs_exit_ratio.pdf}
 \end{minipage}
-\caption{Routing and confidence behaviour at $\tau=0.70$. The left panel shows
-little-model ECE and routing error for the C1-C4 retraining variants, while
-the right panel relates cascade accuracy to early-exit ratio for joint and
-independent cascades. These metrics show why exit ratio must be interpreted
-together with confidence quality and accuracy.}
-\label{fig:rq3-routing}
+\caption{Routing and confidence behaviour at $\tau=0.70$. \emph{Left:}
+little-model ECE and routing error for C1-C4. \emph{Right:} cascade
+accuracy vs.\ early-exit ratio for joint and independent cascades. Exit
+ratio alone does not predict cascade quality: it must be read alongside
+routing error and confidence calibration.}
+\label{fig:routing-diagnostics}
 \end{figure*}
 
-In summary, RQ3 shows that the accuracy-FLOPs trade-off is explained by the
-interaction between threshold, exit quality, and capacity allocation. The
-threshold controls how aggressively the cascade exits; the exit ratio determines
-how often the big model is avoided; routing error determines whether those exits
-are safe; and the little model's FLOPs matter because they are paid for every
-input. The joint search performs better because it optimizes these factors as a
-coupled cascade, whereas the independent baseline can produce high exit ratios
-without equally strong routing quality or capacity allocation.
+The threshold $\tau=0.70$ is one operating point on a continuum.
+Figure~\ref{fig:threshold-sensitivity} sweeps $\tau$ from 0.50 to 0.95
+for C1-C4. Lower thresholds produce cheaper, more exit-heavy cascades;
+higher thresholds approach big-model behaviour. The cascade-aware variants
+(C3 and C4) were trained with $\tau=0.70$ embedded in the soft routing
+term, and remain competitive across mid thresholds, but lose their edge
+once $\tau$ is pushed well above the training value.
 
 \begin{figure*}[t]
 \centering
 \includegraphics[width=0.92\textwidth]{ablation_threshold_sweep_acc_exit.pdf}
-\caption{Threshold sweep for the C1-C4 retraining variants. Increasing the
-confidence threshold reduces the early-exit ratio and generally improves
-cascade accuracy by deferring more samples to the big model. Lower thresholds
-produce cheaper, more exit-heavy cascades, while higher thresholds approach
-big-model behaviour. The cascade-aware variants, C3 and C4, were trained with
-the same threshold through a soft routing term, so their sweep also shows how
-that training objective transfers when the inference threshold is moved away
-from $\tau=0.70$.}
-\label{fig:rq3-threshold-sensitivity}
+\caption{Threshold sweep for C1-C4. Increasing $\tau$ reduces the exit
+ratio and generally improves accuracy by deferring more samples to the big
+model.}
+\label{fig:threshold-sensitivity}
 \end{figure*}
 
 \subsection{Pico 2 Deployment Results}
+\label{sec:results:pico}
 
 To check whether the analytical cascade metrics transfer to an embedded target,
-the selected Arch2 C1--C4 cascades were exported from PyTorch checkpoints to
+the selected A2 C1-C4 cascades were exported from PyTorch checkpoints to
 ONNX and float32 TensorFlow Lite Micro models, then compiled into Raspberry Pi
 Pico 2 firmware. The independent NAS genotype 4 baseline was exported through
 the same path. The normal deployment test streamed the full CIFAR-10 test set
 over USB serial, so each operating point was evaluated on 10,000 images. All
-Pico runs used the same confidence threshold as the main comparison,
-$\tau=0.70$, with temperature $T=1.0$.
+Pico runs used the same confidence threshold $\tau=0.70$ as the main
+comparison and the same softmax
+defined in Section~\ref{sec:background:routing}.
 
-\begin{table}[H]
+\begin{table*}[t]
 \centering
-\caption{Pico 2 serial CIFAR-10 deployment results at $\tau=0.70$. The
-little-path latency is the end-to-end latency for samples that exit after the
-little model. The deferred-path latency includes both the little model and the
-big model.}
+\caption{Pico 2 serial CIFAR-10 deployment results at $\tau=0.70$.
+\textbf{Exit} and \textbf{Defer} report the percentage of the 10{,}000 test
+samples that the threshold router exited at the little model and deferred to
+the big model respectively. \textbf{Little ms} is the end-to-end latency for
+samples that exit after the little model; \textbf{Defer ms} includes the
+little plus the big model.}
 \label{tab:pico-deployment}
-\begin{tabular}{lrrrrrr}
+\small
+\begin{tabular}{@{}lrrrrrr@{}}
 \toprule
-\textbf{Cascade} & \textbf{Acc.} & \textbf{Exit} & \textbf{Defer} &
-\textbf{Little ms} & \textbf{Defer ms} & \textbf{Avg ms} \\
+\textbf{Cascade} & \textbf{Acc.\ (\%)} & \textbf{Exit (\%)} & \textbf{Defer (\%)} &
+\textbf{Little (ms)} & \textbf{Defer (ms)} & \textbf{Avg (ms)} \\
 \midrule
-Arch2 C1 & 78.97 & 42.86 & 57.14 & 40.34 & 204.19 & 133.97 \\
-Arch2 C2 & 79.96 & 32.66 & 67.34 & 40.36 & 204.21 & 150.70 \\
-Arch2 C3 & 78.94 & 42.64 & 57.36 & 40.34 & 204.20 & 134.33 \\
-Arch2 C4 & 80.46 & 27.60 & 72.40 & 40.37 & 204.22 & 159.00 \\
-Independent 4 & 73.47 & 58.99 & 41.01 & 131.93 & 848.45 & 425.77 \\
+A2 C1            & 78.97 & 42.86 & 57.14 & 40.34 & 204.19 & 133.97 \\
+A2 C2            & 79.96 & 32.66 & 67.34 & 40.36 & 204.21 & 150.70 \\
+A2 C3            & 78.94 & 42.64 & 57.36 & 40.34 & 204.20 & 134.33 \\
+A2 C4            & 80.46 & 27.60 & 72.40 & 40.37 & 204.22 & 159.00 \\
+Independent 4    & 73.47 & 58.99 & 41.01 & 131.93 & 848.45 & 425.77 \\
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
-The Arch2 variants have almost identical per-path latency because they share
+The A2 variants have almost identical per-path latency because they share
 the same exported architecture and differ mainly in trained weights and routing
 behaviour. Their little path takes about 40.3 ms, while a deferred sample takes
 about 204.2 ms end-to-end. The average latency therefore follows the observed
-route split: C1 and C3 are the fastest Arch2 variants because they exit on
+route split: C1 and C3 are the fastest A2 variants because they exit on
 about 43\% of the test set, whereas C4 reaches the highest Pico accuracy but
 defers 72.4\% of samples and is correspondingly slower. The independent
-baseline exits more often than any Arch2 variant, but its little and deferred
+baseline exits more often than any A2 variant, but its little and deferred
 paths are much slower, giving a much higher average latency despite its higher
 exit ratio.
 
 The deployment also exposed a memory distinction that is not visible from
-accuracy and FLOPs alone. The Arch2 firmware used separate TensorFlow Lite
+accuracy and MACs alone. The A2 firmware used separate TensorFlow Lite
 Micro arenas of 128 KiB for the little model and 256 KiB for the big model,
 while the independent firmware required arena tuning and was finally tested
 with a 96 KiB little arena and a 352 KiB big arena. Additional independent
 energy builds with 160/288, 192/256, 224/224, and 256/192 KiB arena splits
 were produced to diagnose feasible allocations. This suggests that practical
-deployment feasibility depends not only on model weights and analytical FLOPs,
+deployment feasibility depends not only on model weights and analytical MACs,
 but also on activation memory and TensorFlow Lite Micro arena requirements.
 
 \subsection{Energy Consumption}
@@ -1256,24 +1416,28 @@ during active cascade inference, so the Uno measurement excluded most idle
 time. The route-aware build also used GP19 to indicate whether a sample
 deferred to the big model.
 
-\begin{table}[H]
+\begin{table*}[t]
 \centering
-\caption{Route-aware Pico 2 energy measurement on a 1,000-sample embedded
-CIFAR-10 subset. The joint row corresponds to the exported Arch2 co-searched
-cascade used for the final Pico comparison.}
+\caption{Route-aware Pico 2 energy measurement on a 1{,}000-sample embedded
+CIFAR-10 subset. \textbf{Joint A2 (C4)} is the high-accuracy
+cascade-aware + label-smoothing variant of the co-searched A2 cascade used
+for the deployment comparison. \textbf{Exit} and \textbf{Defer} are the
+percentage of the 1{,}000 samples handled by the little path and the
+deferred path respectively.}
 \label{tab:pico-energy}
-\begin{tabular}{lrrrrrr}
+\small
+\begin{tabular}{@{}lrrrrrr@{}}
 \toprule
-\textbf{Cascade} & \textbf{Time (s)} & \textbf{Energy (J)} &
-\textbf{J/sample} & \textbf{Power (W)} & \textbf{Exit} & \textbf{Defer} \\
+\textbf{Cascade}  & \textbf{Time (s)} & \textbf{Energy (J)} &
+\textbf{J/sample} & \textbf{Power (W)} & \textbf{Exit (\%)} & \textbf{Defer (\%)} \\
 \midrule
-Independent 4 & 428.7 & 44.0 & 0.044 & 0.099 & 58.5 & 41.5 \\
-Joint Arch2 & 330.1 & 34.3 & 0.034 & 0.105 & 53.0 & 47.0 \\
+Independent 4     & 428.7 & 44.0 & 0.044 & 0.099 & 58.5 & 41.5 \\
+Joint A2 (C4)     & 330.1 & 34.3 & 0.034 & 0.105 & 53.0 & 47.0 \\
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
-The joint Arch2 cascade used 34.3 J over the embedded subset, compared with
+The joint A2 cascade used 34.3 J over the embedded subset, compared with
 44.0 J for the independent baseline. This is a 22.0\% reduction in total energy
 and approximately the same reduction per image. Runtime also decreased from
 428.7 s to 330.1 s, a 23.0\% reduction. The average measured power is similar
@@ -1290,7 +1454,7 @@ than by a lower instantaneous power draw.
     \fill[blue!65] (0,2.72) rectangle (0.22,2.94);
     \node[anchor=west] at (0.30,2.83) {\scriptsize Independent 4};
     \fill[green!60!black] (2.45,2.72) rectangle (2.67,2.94);
-    \node[anchor=west] at (2.75,2.83) {\scriptsize Joint Arch2};
+    \node[anchor=west] at (2.75,2.83) {\scriptsize Joint A2};
 
     \node[anchor=east, font=\scriptsize\bfseries] at (1.05,2.20) {Energy};
     \fill[blue!18] (1.25,2.35) rectangle (6.25,2.65);
@@ -1318,7 +1482,7 @@ than by a lower instantaneous power draw.
             node[below=0.08cm, black] {\scriptsize \label\%};
 \end{tikzpicture}}
 \caption{Normalized route-aware Pico 2 energy-test comparison. Independent 4
-is shown as the 100\% baseline; the joint Arch2 cascade reduces total energy by
+is shown as the 100\% baseline; the joint A2 cascade reduces total energy by
 22.0\% and runtime by 23.0\% on the 1,000-sample embedded subset.}
 \label{fig:pico-energy-comparison}
 \end{figure}
@@ -1326,11 +1490,11 @@ is shown as the 100\% baseline; the joint Arch2 cascade reduces total energy by
 The route counts make this result especially useful. In the energy run, the
 joint cascade actually deferred slightly more samples than the independent
 baseline, but still consumed less total energy. This matches the latency result
-in Table~\ref{tab:pico-deployment}: the joint Arch2 paths are substantially
+in Table~\ref{tab:pico-deployment}: the joint A2 paths are substantially
 faster, so the energy benefit does not come only from exiting more often. It
 comes from the deployed cost of each path. The independent baseline has a high
 exit ratio, but its little path and deferred path are both expensive on the
-Pico 2. This reinforces the conclusion that exit ratio, analytical FLOPs, and
+Pico 2. This reinforces the conclusion that exit ratio, analytical MACs, and
 deployment memory must be interpreted together when judging whether a cascade is
 actually efficient on hardware.
 
@@ -1340,139 +1504,60 @@ actually efficient on hardware.
 \section{Discussion}
 \label{sec:discussion}
 
-This section interprets the results in relation to the three research
-questions. The discussion focuses on what the experiments show about joint
-cascade design, retraining losses, and confidence-based routing, and then
-summarizes the main limitations of the study.
+This section interprets the results for the two research questions and the
+supporting routing analysis. It focuses on what the experiments show about
+joint cascade design (RQ1), retraining losses (RQ2), and confidence-based
+routing, and then summarises the main limitations of the study.
 
-\subsection{Joint Cascade Design}
+\subsection{Joint Cascade Design (RQ1)}
 
-The results support the idea that a big/little cascade should be designed as a
-coupled system rather than as two unrelated classifiers. The joint NAS pipeline
-selects architectures using cascade accuracy, expected cascade FLOPs, exit
-ratio, and deployment constraints at the same time. In contrast, the
-independent baseline first optimizes little and big models as standalone
-classifiers and only later combines them into cascade pairs. The RQ1 comparison
-therefore evaluates an end-to-end cascade-design pipeline. It does not isolate
-architecture search from joint retraining, but it does test the full procedure
-that would be used to design a deployed cascade.
+The RQ1 comparison supports designing a big/little cascade as a coupled
+system rather than as two unrelated classifiers. At $\tau=0.70$ the
+co-searched cascades reach 80.69\% accuracy at 2.08\,M MACs versus 74.03\%
+at 2.22\,M MACs for the independent baseline: the joint pipeline is not
+merely more accurate but more expensive: it occupies a strictly better
+region of the accuracy-MACs frontier under the same memory envelope.
 
-At the fixed operating threshold $\tau=0.70$, the co-searched cascades achieve
-substantially higher cascade accuracy than the independent baseline. The exact
-accuracy-compute point depends on the retraining loss: C3 is the cheaper
-cascade-aware point, while C4 obtains higher accuracy by deferring more samples
-and therefore using more FLOPs. This is the strongest result in the study: the
-joint search does not merely find a more accurate but more expensive cascade;
-it produces a set of stronger operating points under the same memory envelope.
-The independent baseline still exits more often, but its component models are
-weaker and its routing decisions produce lower final cascade accuracy.
+The mechanism is visible in the per-role MACs breakdown
+(Figure \ref{fig:appendix-macs-breakdown} in Appendix). In the independent baseline the
+little model is selected as a standalone classifier within a parameter
+budget, so it can still be expensive in MACs if it uses costly convolutions
+on high-resolution feature maps, so parameter count and MACs are not
+interchangeable. The joint search instead sees the routing behaviour
+during evaluation and directly optimises expected cascade MACs and cascade
+accuracy. This pushes it toward cheaper little branches that act as
+cascade front-ends rather than standalone classifiers, and partly explains
+why the independent baseline can have a high exit ratio while still
+producing a weaker accuracy-MACs trade-off.
 
-Figure~\ref{fig:rq1-joint-independent} shows this separation for the
-high-accuracy C4 setting. It should be read together with the C1-C4 ablation:
-C4 demonstrates the upper-accuracy joint setting, while C3 demonstrates the
-cheaper cascade-aware setting. Additional diagnostic plots in
-Appendix~\ref{app:diagnostic-plots} break down little, big, and expected
-cascade FLOPs, showing how the selected architecture sizes and exit ratios
-combine to determine the final compute cost.
-
-The FLOPs breakdown is important because the little model is evaluated for
-every input. In the independent baseline, the little model is selected as a
-standalone classifier under a parameter budget, so it can still be expensive in
-MACs if it uses costly convolutions on high-resolution feature maps. Parameter
-count and FLOPs are therefore not interchangeable. The independent little model
-is also optimized as if it should classify the full data distribution, while in
-a cascade it mainly needs to classify easy, high-confidence inputs and defer
-harder cases. The joint search sees this routing behaviour during evaluation:
-it directly optimizes expected cascade FLOPs and cascade accuracy, where the
-little-model cost is always paid and wrong confident exits are harmful. This
-encourages cheaper little branches that act more like cascade front-ends rather
-than standalone classifiers. This partly explains why the independent baseline
-can have a high exit ratio while still producing a weaker accuracy-FLOPs
-trade-off.
-
-\subsection{Effect of Retraining Loss}
+\subsection{Effect of Retraining Loss (RQ2)}
 
 The C1-C4 ablation shows that the retraining objective changes how the
-selected cascades route inputs, but the architecture selected by NAS remains a
-major factor in the final accuracy-FLOPs trade-off. CE remains a strong
-baseline on CIFAR-10. The cascade-aware loss without smoothing, C3,
-slightly improves cascade accuracy and lowers expected FLOPs compared with C1,
-but the difference is small. The clearer effect comes from label smoothing:
-C2 and C4 reduce harmful routing errors and obtain higher cascade accuracy by
-deferring more samples to the big model. This makes the result useful even
-though it is not a simple standalone win for the custom loss: the architecture
-selection, operating threshold, confidence behaviour, and smoothing all shape
-the final cascade.
+selected cascades route inputs, but the NAS-selected architecture remains
+the dominant factor in the final accuracy-MACs trade-off. CE (C1) is a
+strong baseline on CIFAR-10. The cascade-aware loss without smoothing (C3)
+moves in the intended direction, with marginally higher accuracy at
+slightly lower MACs than C1, but the effect is small. The clearer effect comes
+from label smoothing: C2 and C4 reduce routing errors and obtain higher
+accuracy by deferring more samples. C4 (cascade-aware + smoothing) gives
+the highest mean accuracy and the lowest routing error among C1-C4 but
+also uses the most MACs. The win is a trade-off, not a strict replacement
+of CE.
 
-Figure~\ref{fig:rq2-ablation} should therefore be read as evidence about
-operating behaviour rather than as a clean replacement of one loss by another.
-The cascade-aware variants are competitive, and C3 moves in the desired
-direction by achieving marginally higher accuracy with slightly lower FLOPs
-than C1. However, the difference between C1 and C3 is small compared with the
-effect of smoothing in C2 and C4. The current CIFAR-10 setting therefore does
-not prove that the cascade-aware terms are the dominant source of improvement,
-although the loss remains useful as a routing-aware regularizer and a plausible
-direction for further tuning.
-
-\subsection{Routing and Confidence}
-
-The experiments also show that confidence routing is central to cascade
-usefulness. The system is not determined only by little-model and big-model
-standalone accuracy. It also depends on whether the little model is confident
-on the right samples. A high exit ratio is beneficial only when the exited
-samples are mostly correct; otherwise, it creates avoidable routing errors
-where the cascade exits early even though the big model would have been
-correct. This is why ECE, routing error rate, and exit ratio are necessary
-alongside accuracy and FLOPs when interpreting the results. In the final
-ablation, C4 has the lowest routing error, while C3 has a higher exit ratio and
-lower FLOPs; this illustrates the practical tension between compute saving and
-safe early exits.
-
-Figure~\ref{fig:rq3-routing} shows why routing cannot be reduced to a single
-exit-ratio number. A cascade with more early exits may be cheaper, but it is
-only useful if those exits are reliable. Conversely, a cascade with strong
-accuracy may still use more computation if it defers many samples. Routing
-error captures the specific failure case that matters for the threshold router:
-the little model exits confidently and incorrectly on a sample that the big
-model would have classified correctly. The appendix compares the independent
-baseline's routing diagnostics with the C1-C4 ablations. This supports a
-cautious interpretation: co-search does not always produce lower ECE, but the
-lower-routing joint variants reduce harmful early exits more effectively.
-
-Figure~\ref{fig:rq3-threshold-sensitivity} shows why the fixed threshold
-$\tau=0.70$ should be interpreted as one operating point rather than a universal
-best setting. The same trained cascade can move along a spectrum from cheaper
-and more exit-heavy to more accurate and more deferral-heavy simply by changing
-the threshold. This is important for deployment, because the preferred
-threshold depends on whether the target device prioritizes accuracy, latency,
-or energy. The threshold should also be interpreted probabilistically. If the
-little model were perfectly calibrated, predictions with confidence around
-0.70 would still be expected to be wrong about 30\% of the time. A threshold of
-0.70 therefore does not guarantee correctness; it defines how much uncertainty
-the cascade accepts before deferring to the big model. We use $\tau=0.70$
- because it is low enough to allow the little model to exit on a meaningful
- fraction of inputs under the limited proxy-evaluation budget, but high enough
- to avoid routing
-many clearly low-confidence predictions through the little model. Since the
-joint search also evaluates candidates at this threshold, the selected
-architectures are partly optimized for $\tau=0.70$. This is appropriate for a
-fixed-threshold deployment setting, but it also means that the fixed-threshold
-results may be relatively favourable to the threshold used during search.
-
-For C3 and C4, $\tau=0.70$ also enters the retraining objective itself. The
-cascade-aware loss uses a soft routing probability based on the little model's
-confidence relative to the threshold, so it encourages behaviour that is useful
-near this operating point. This helps explain the threshold-sweep shape: the
-cascade-aware variants, especially C3, are competitive at lower and mid
-thresholds where early exits remain common, but can lose their advantage once
-the threshold is pushed above $0.70$ and the routing policy moves away from the
-one emphasized during training.
+The threshold sweep in Figure~\ref{fig:threshold-sensitivity} adds
+context: the cascade-aware variants were trained with $\tau=0.70$ embedded
+in the soft routing term, and remain competitive at mid thresholds but
+lose their edge once $\tau$ moves well above the training value. The
+selected architecture, the operating threshold, the confidence behaviour,
+and label smoothing all shape the final cascade. The cascade-aware loss is
+best read as a routing-aware regulariser rather than a drop-in CE
+replacement.
 
 \subsection{Pico 2 Deployment Interpretation}
 
 The Pico 2 measurements support the main dynamic-inference assumption behind
-the analytical FLOPs metric: early exits are cheaper than deferrals. For the
-Arch2 cascades, samples that exit after the little model take about 40 ms,
+the analytical MACs metric: early exits are cheaper than deferrals. For the
+A2 cascades, samples that exit after the little model take about 40 ms,
 whereas deferred samples take about 204 ms because the big model is evaluated
 after the little model. This approximately five-fold per-sample latency
 difference means that the exit ratio has a direct hardware effect. C1 and C3,
@@ -1481,238 +1566,143 @@ which defer more often. Thus, the measured latency confirms that avoiding the
 big model produces the expected compute saving on the Pico 2.
 
 At the same time, the hardware results show why analytical MACs should be
-treated as a proxy rather than a complete deployment model. Within the Arch2
-family, the average analytical FLOPs increase from roughly 0.87M MACs for C1
+treated as a proxy rather than a complete deployment model. Within the A2
+family, the average analytical MACs increase from roughly 0.87M MACs for C1
 and C3 to roughly 1.03M MACs for C4, and measured latency increases in the same
-direction. This agreement is useful because it validates the FLOPs objective as
+direction. This agreement is useful because it validates the MACs objective as
 a reasonable ranking signal among closely related cascades. However, the
-independent baseline breaks any simple FLOPs-to-latency interpretation. Its
+independent baseline breaks any simple MACs-to-latency interpretation. Its
 average cascade cost is about 2.05M MACs, but its measured latency is 425.77
-ms, far more than a simple doubling of the Arch2 latency would suggest. The
+ms, far more than a simple doubling of the A2 latency would suggest. The
 independent little model alone takes about 131.93 ms, more than three times the
-Arch2 little path, even though both are small enough to fit the search budget.
+A2 little path, even though both are small enough to fit the search budget.
 
 This mismatch is likely caused by hardware details that are intentionally
-abstracted away during NAS. The analytical FLOPs calculation counts multiply-
+abstracted away during NAS. The analytical MACs calculation counts multiply-
 accumulate work, but it does not model TensorFlow Lite Micro kernel
 implementations, depthwise versus standard convolution efficiency on the Pico
 2, memory movement, cache effects, tensor layout conversions, or arena
 allocation pressure. It also does not capture the fact that deployment memory
 is split between flash-resident model data and SRAM-resident tensor arenas. The
-Arch2 models used a stable 128/256 KiB little/big arena split, whereas the
+A2 models used a stable 128/256 KiB little/big arena split, whereas the
 independent baseline required a much larger big-model arena and several
 diagnostic builds. This reinforces the distinction made in the methodology:
 analytical MACs and estimated memory are useful for search and comparison, but
 final deployment still requires hardware measurement.
 
-Overall, the Pico 2 results strengthen the interpretation of RQ1 and RQ3. The
-joint Arch2 cascades do not only look better on the analytical
-accuracy--FLOPs frontier; they also run substantially faster on the target
-microcontroller. The measured route split explains much of the latency
-difference within a fixed architecture, while the independent baseline shows
-that a high exit ratio is not sufficient when the little model itself is slow
-and memory-hungry. The deployment results therefore support the expected
-compute savings of threshold-based cascades, but they also show that FLOPs,
-exit ratio, and memory must be interpreted together rather than as independent
+The Pico 2 results strengthen RQ1 from a hardware angle. The joint A2
+cascades look better on the analytical frontier and also run substantially
+faster on the target microcontroller. The measured route split explains
+most of the latency difference within a fixed architecture, while the
+independent baseline shows that a high exit ratio does not save compute
+when the little path is itself slow and memory-hungry. MACs, exit ratio,
+and arena memory must be read together rather than as independent
 deployment predictors.
-
-\subsection{Dataset and Framework Interpretation}
-
-The dataset also affects the interpretation. CIFAR-10 is small enough to make
-the full NAS and retraining pipeline feasible, but it may not create a strong
-division between easy examples for the little model and hard examples for the
-big model. In several runs, the little model approaches the big model's
-standalone accuracy. This reduces the natural room for a cascade-aware loss to
-specialize the two models. A more complex dataset could make the big/little
-division of labour clearer, but would also increase the cost of NAS.
-
-Overall, the contributions are the joint NSGA-II co-search setup, the
-cascade-aware co-training loss, the C1-C4 retraining ablation, and the analysis
-of how threshold choice, exit ratio, routing errors, and capacity allocation
-shape the final accuracy-FLOPs trade-off. The results show that this framework
-can find memory-feasible dynamic cascades and that joint co-search is more
-effective than independently searching the two models at finding strong cascade
-operating points. The analysis further exposes why different operating points
-trade accuracy against expected compute.
 
 \subsection{Limitations}
 
-The main limitations concern the gap between a feasible NAS experiment and the
-ideal exhaustive optimization of a deployed MCU cascade.
+The reported results should be read as the outcome of a practical NAS
+budget on CIFAR-10, not an exhaustive optimum. The main limitations are:
 
 \subsubsection{Proxy Training}
-The architecture search relies on proxy training to evaluate candidate
-cascades. This is necessary because a full retraining run for every little-big
-pair would make the search computationally impractical. However, proxy training
-also means that each candidate is judged before it has necessarily reached its
-full potential. Some architectures may learn slowly and therefore appear weak
-during the proxy stage, while others may look strong early but not retain that
-advantage after longer training. This limits how confidently the search ranking
-can be interpreted. The final retraining step reduces this issue for selected
-architectures, but it does not recover candidates that were discarded because
-their proxy performance was misleading.
+Architecture selection uses a 5-epoch proxy: candidates are judged before
+they reach full potential. Architectures that learn slowly may be unfairly
+filtered out, and the final 50-epoch retraining of the survivors does not
+recover those.
 
-\subsubsection{Dataset Size}
-The experiments use CIFAR-10 with a train/validation split. CIFAR-10 is useful
-for this project because it is small enough to support repeated NAS,
-retraining, threshold evaluation, export, and microcontroller testing. At the
-same time, the dataset is limited in both size and visual complexity. The
-learned cascade behaviour may therefore depend on
-CIFAR-10-specific properties, such as the distribution of easy and difficult
-samples, the class set, and the image resolution. A larger or more complex
-dataset could change which architectures are feasible, which loss functions are
-useful, and how often the little model can safely handle an example without
-deferring to the big model.
+\subsubsection{Dataset Size and Complexity}
+CIFAR-10 supports the full pipeline at moderate compute, but its limited
+visual complexity compresses the natural gap between easy little-model
+samples and hard big-model samples. In several runs, the little model
+approaches the big model's standalone accuracy, reducing the room for a
+cascade-aware loss to exploit a clear role separation. The learned cascade
+behaviour may therefore depend on CIFAR-10-specific properties (class set,
+resolution, easy/hard distribution). A more complex dataset could change
+which architectures are feasible, how often the little model can safely
+exit, and how large the loss-ablation effects become.
 
-\subsubsection{Search Space Size}
-The search space contains a very large number of possible cascade
-configurations. Each cascade is defined not only by one architecture, but by a
-little model, a big model, and how their capacities interact under the routing
-rule. Even with a restricted CNN design space, the number of possible
-combinations grows quickly as block depth, channel count, kernel size,
-convolution type, and residual choices are varied. With relatively few hard
-bounds, the search must explore a space containing many infeasible or
-unpromising candidates before it finds architectures that satisfy the Pico 2
-constraints and still perform well. This can make the search inefficient and
-increases the chance that good feasible regions are only sparsely sampled. More
-role-specific constraints, stronger feasibility filters, or hardware-informed
-priors could make the search more focused.
-
-\subsubsection{Search and Training Budget}
-The NAS experiments use a finite search and training budget. The joint search uses a
-population of 20 for 20 generations, while the independent baseline uses 20
-individuals for 10 generations per role. Each candidate is proxy-trained for
-only 5 epochs. These settings make the experiment feasible, but they also mean
-that the search only samples a small fraction of the possible architecture
-space. The independent setup also matches the approximate number of
-proxy-trained candidates rather than giving each role the same 20-generation
-evolutionary depth as the joint search. This was a practical compromise because
-the independent baseline performs two sequential searches, but a stricter
-comparison would be to increase the generation budget for both methods.
-Increasing the number of generations, population size, or proxy-training epochs
-could improve the reliability of the selected architectures, but would also
-increase runtime substantially. The same applies to final retraining: 50 epochs
-is long enough to obtain useful comparisons across many variants, but many
-CIFAR-style training setups use longer schedules such as 100-200 epochs. A
-longer retraining schedule could improve absolute accuracy and might give the
-cascade-aware loss more time to influence confidence and routing behaviour. The
-reported results should therefore be understood as the outcome of a practical
-NAS budget rather than an exhaustive optimum.
+\subsubsection{Search Budget}
+Joint NAS uses 20 individuals for 20 generations. The independent
+baseline uses 20 individuals for 10 generations per role. The independent baseline
+is matched on \emph{number of proxy-trained candidates} (the dominant
+compute cost), not on evolutionary depth per role. This is a practical
+compromise that should be tightened in future work. Across the independent baseline
+the two role-specific searches together consumed approximately 14.4 hours
+of wall-time on the development machine (summed
+\texttt{time\_s} column of \texttt{big\_search\_log.csv} and
+\texttt{little\_search\_log.csv}); joint-search wall-time was not logged at
+the per-candidate level and is therefore not directly comparable here, a
+gap we revisit in future work. Final retraining uses 50 epochs against the
+100-200 epochs common in CIFAR-style work, which limits absolute accuracy
+claims.
 
 \subsubsection{Float32 Deployment}
-The deployment experiment uses float32 TensorFlow Lite Micro models instead of
-quantized models. This choice makes the export path easier to validate because
-the deployed models remain close to the PyTorch models used during training. It
-also avoids adding quantization error as a separate variable in the first
-deployment experiment. However, float32 inference is not the most
-memory-efficient representation for an MCU. Compared with int8 quantization,
-float32 weights require substantially more memory, reducing the amount of model
-capacity available within the same Pico 2 budget. This matters directly for the
-project because the search is trying to allocate capacity between the little
-and big models. A quantized deployment could allow larger architectures, lower
-latency, or different routing behaviour, but it could also change confidence
-values and therefore affect the cascade's exit decisions.
+TensorFlow Lite Micro models are deployed at float32, which keeps the
+export path close to the trained PyTorch models but is not the most
+memory-efficient MCU representation. int8 quantization would free arena
+budget for larger architectures but would also alter confidence values
+(and therefore exit decisions); we leave this for future work.
 
-\subsubsection{Pico Deployment Measurements}
-The Pico 2 evaluation measures on-device latency and routing behaviour, which
-is an important step beyond reporting only proxy FLOPs. The route-aware energy
-test adds an initial direct measurement of energy on a 1,000-sample embedded
-subset, but it is less comprehensive than the 10,000-sample serial latency
-evaluation and is reported only for the final joint-vs-independent comparison.
-For microcontroller applications, especially battery-powered ones, energy may
-be as important as latency. A cascade that is faster is not necessarily the most
-energy-efficient if its power draw differs across model paths or if repeated
-big model invocations have a disproportionate cost. Future evaluation should
-therefore include repeated energy measurements across all C1--C4 variants,
-additional boards, and quantized models in addition to accuracy, route split,
-and latency.
+\subsubsection{Per-Variant Pico Measurements}
+The full 10K serial latency evaluation covers all five operating points
+(C1-C4 plus the independent baseline), but the route-aware energy
+experiment was run only on the high-accuracy A2 C4 joint cascade and the
+independent baseline on a 1K-image embedded subset. Repeating the energy
+measurement across all C1-C4 variants, on multiple boards, and with
+quantised models is left to future work.
 
 \subsection{Future Work}
-Future work should first evaluate the framework on a more complex dataset such
-as CIFAR-100 or Tiny ImageNet. This would test whether the cascade-aware design
-becomes more useful when there is a clearer separation between easy and hard
-inputs. A stronger dataset would also make it easier to judge whether the big
-model provides a meaningful advantage over the little model.
+\label{sec:future-work}
 
-A second direction is to repeat the comparison with a larger search and
-training budget. The current setup matches the approximate number of
-proxy-trained candidates between joint and independent NAS, but independent NAS
-uses 10 generations per role while joint NAS evolves complete pairs for 20
-generations. Future experiments should test larger population sizes, generation
-counts, and proxy-training budgets for both methods to evaluate whether the
-observed advantage remains under a larger search budget. The selected
-architectures should also be retrained for longer schedules, such as 100-200
-epochs, to estimate final accuracy more precisely and to test whether
-cascade-aware losses need more training time to shape confidence and routing
-behaviour.
-
-A further direction is to improve the routing mechanism. This work uses maximum
-softmax confidence because it is simple, cheap, and directly compatible with an
-early-exit cascade. Other routing rules could be tested, including margin-based
-routing, entropy-based routing, or a small learned router. These alternatives
-may identify uncertain samples more reliably than raw confidence.
-
-The cascade-aware loss should also be explored more systematically. The current
-weights were chosen from a small set of manual configuration tests, where the
-setting with a higher defer-cost term showed the most potential for C3. This is
-not enough to claim that the setting is globally optimal. A broader multi-seed
-sweep over defer cost, confident-wrong penalty, routing sharpness, auxiliary
-loss weights, and training threshold could show whether the loss can more
-consistently improve cascade accuracy or exit ratio. It would also be useful to
-compare training at the same threshold used for final evaluation against
-training with a range of thresholds.
-
-Finally, future experiments should include stronger deployment-oriented
-baselines and measurements. Single little-only and big-only models, cascades
-matched by FLOPs, and quantized int8 variants would make the accuracy-compute
-trade-off easier to interpret. Hardware evaluation should also include latency,
-peak memory, and energy measurements, since FLOPs and parameter count are only
-proxies for embedded deployment cost.
+Several directions follow directly from the limitations. The most
+informative next step is to repeat the joint-vs-independent comparison on
+a more complex dataset (CIFAR-100, Tiny ImageNet) and with a larger
+search and retraining budget, including a wall-time-matched joint vs
+independent comparison rather than only a candidate-count match. Further
+work should sweep the cascade-aware loss hyperparameters $(k, \lambda_l,
+\lambda_b, \lambda_d, \lambda_w)$ across multiple seeds, evaluate
+alternative routing rules (margin-based, entropy-based, or a small learned
+router \cite{regol2024jeidnn,bolukbasi2017adaptive}), and extend the
+deployment study to int8-quantised TFLM models with per-variant energy
+measurements on multiple boards. Together these would address the proxy,
+budget, calibration, and hardware-fidelity caveats identified above.
 
 % ============================================================================
 \section{Conclusion}
 \label{sec:conclusion}
 
-This work investigated NAS-driven big/little cascades for input-adaptive
-inference under a small deployment-memory budget. The proposed framework
-combines joint cascade architecture search, constrained model selection,
-retraining ablations, and threshold-based evaluation. The results show that
-joint co-search can find substantially better cascades than an independently
-searched baseline. At the main threshold $\tau=0.70$, the joint variants cover
-a better accuracy-FLOPs region: C3 is the cheaper cascade-aware operating
-point, while C4 is the higher-accuracy, higher-compute operating point. Both
-support the central argument that the little model, big model, and routing rule
-should be designed as a coupled system.
-
-The retraining ablation shows a more nuanced result. The custom cascade-aware
-loss is not a dramatic standalone replacement for CE on CIFAR-10, but the C3
-setting slightly improves accuracy and lowers FLOPs compared with CE. Combining
-cascade-aware loss with label smoothing gives the highest average
-accuracy and the lowest routing error among the C1-C4 variants, but it also
-uses more FLOPs. This suggests that cascade-aware objectives are useful, but
-their benefit depends on how they interact with confidence calibration, exit
-ratio, and the selected architecture.
-
-The experiments also show that threshold choice, exit ratio, calibration, and
-routing error are essential for interpreting cascade systems. A cascade is only
-efficient when the little model exits on samples it can classify correctly; a
-high exit ratio alone is not sufficient. The Pico 2 deployment confirms this
-hardware view: the joint Arch2 cascade has much lower measured latency and
-lower route-aware energy than the independent baseline, even though the
-independent baseline exits more often. This shows why analytical MACs are
-useful search proxies but cannot fully capture TensorFlow Lite Micro latency,
-arena pressure, and board-level energy behaviour. Overall, the project
-demonstrates a reproducible framework for NAS-driven dynamic inference and
-shows that joint cascade design can improve the accuracy-compute trade-off,
-while leaving open important questions about loss design, calibration, larger
-datasets, quantization, and hardware-aware optimization.
+We studied NAS-driven big/little cascades for input-adaptive inference
+under a 450~KiB MCU deployment budget. The proposed framework combines
+joint NSGA-II cascade architecture search, constrained model selection,
+four retraining ablations (C1: CE, C2: CE + smoothing, C3: cascade-aware
+loss, C4: cascade-aware + smoothing), threshold-based evaluation, and
+Raspberry Pi Pico 2 deployment. The joint co-search produces substantially
+better cascades than an independently-searched baseline: at $\tau=0.70$ it
+reaches 80.69\% accuracy at 2.08~M MACs against the baseline's 74.03\% at
+2.22~M MACs, and on-device it cuts runtime by 23\% and route-aware energy
+by 22\%. The C1-C4 ablation is more nuanced. C3 nudges accuracy up and
+MACs down relative to CE but the effect is small. Label smoothing (C2, C4)
+is the dominant retraining-loss factor. The cascade-aware loss is best
+read as a routing-aware regulariser whose benefit depends on confidence
+calibration, exit ratio, and the selected architecture. The Pico 2 results
+also show that analytical MACs, although a useful search proxy, do not
+fully predict TensorFlow Lite Micro latency or arena pressure, so MACs,
+exit ratio, and memory must be interpreted together. Together these
+results support designing the little model, big model, and routing rule as
+a single coupled system, and they leave open further work on loss design,
+calibration, larger datasets, quantisation, and hardware-aware
+optimisation.
 
 % ============================================================================
 \section*{Acknowledgments}
-The authors would like to thank Emil Jorgensen and Francesco Daghero for their
+The authors would like to thank Emil Jørgensen Njor and Francesco Daghero for their
 supervision, feedback, and guidance throughout the project. We also thank the
 University of Southern Denmark for providing access to computing resources and
 development facilities used during the experiments.
+
+% ============================================================================
+\bibliographystyle{IEEEtran}
+\bibliography{references}
 
 % ============================================================================
 \clearpage
@@ -1720,9 +1710,8 @@ development facilities used during the experiments.
 \appendix[Additional Diagnostic Plots]
 \label{app:diagnostic-plots}
 
-This appendix collects supporting plots that are useful for interpreting the
-main results, but are not necessary for the primary RQ1-RQ3 narrative. The
-figures should be read as diagnostic evidence rather than additional headline
+This appendix collects supporting plots that complement the main RQ1-RQ2
+results. They are diagnostic evidence rather than additional headline
 results.
 
 \begin{figure}[H]
@@ -1732,7 +1721,7 @@ results.
 retraining. The selected candidates are chosen from the compute-saving knee
 region after feasibility checks and the constraint
 $F_{\mathrm{cascade}} < F_b$, not simply by taking the three highest
-proxy-accuracy points. The figure therefore documents the selection heuristic;
+proxy-accuracy points. The figure documents the selection heuristic;
 final claims are based on fully retrained test-set results rather than the
 5-epoch proxy scores.}
 \label{fig:appendix-proxy-selection}
@@ -1749,21 +1738,21 @@ final claims are based on fully retrained test-set results rather than the
     \centering
     \includegraphics[width=\linewidth]{flops_breakdown_ablation_c1_c4_t070.pdf}
 \end{minipage}
-\caption{FLOPs breakdown at $\tau=0.70$. The independent baseline and joint
+\caption{MACs breakdown at $\tau=0.70$. The independent baseline and joint
 variants use different selected architecture pairs, while the C1-C4 joint
 ablations use the same selected architectures. Changes in expected cascade
-FLOPs within the joint ablation therefore mainly reflect differences in exit
-ratio caused by the retraining objective.}
-\label{fig:appendix-flops-breakdown}
+MACs within the joint ablation mainly reflect differences in exit ratio
+caused by the retraining objective.}
+\label{fig:appendix-macs-breakdown}
 \end{figure}
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.62\textwidth]{independent_ece_routing_at_070.pdf}
 \caption{Independent-baseline routing diagnostics at $\tau=0.70$. The
-independent baseline can have lower ECE than some joint variants, but it still
-has lower cascade accuracy, showing that calibration alone is not sufficient to
-explain the final trade-off.}
+independent baseline can have lower ECE than some joint variants but still
+has lower cascade accuracy, showing that calibration alone is not
+sufficient to explain the final trade-off.}
 \label{fig:appendix-routing-diagnostics}
 \end{figure}
 
@@ -1771,15 +1760,10 @@ explain the final trade-off.}
 \centering
 \includegraphics[width=0.92\textwidth]{confidence_accuracy_ablation_grid.pdf}
 \caption{Confidence-accuracy reliability diagrams for the C1-C4 retraining
-variants. The figure complements the ECE and routing-error summaries by showing
-where each variant is under- or over-confident across confidence bins.}
+variants. The figure complements the ECE and routing-error summaries by
+showing where each variant is under- or over-confident across confidence
+bins.}
 \label{fig:appendix-confidence-accuracy-grid}
 \end{figure}
-
-% ============================================================================
-\clearpage
-\twocolumn
-\bibliographystyle{IEEEtran}
-\bibliography{references}
 
 \end{document}

@@ -543,7 +543,7 @@ def test_evaluate_cascade_independent_returns_cascade_metrics():
 
 def test_combined_cascade_csv_header_includes_cascade_columns():
     """combined_cascade_results.csv must include the columns needed for
-    joint-vs-independent comparison on accuracy, FLOPs, memory, and routing.
+    joint-vs-independent comparison on accuracy, MACs, memory, and routing.
 
     We assert this against the actual CSV-writing code path by running
     `evaluate_combined_cascades` with a no-op training (proxy_epochs=0).

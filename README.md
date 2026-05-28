@@ -46,7 +46,7 @@ used in the report. Regenerated experiment plots are written separately under
 The project compares two ways to build a little/big cascade:
 
 - **Joint NAS co-search:** NSGA-II searches complete cascade pairs directly
-  using cascade accuracy and expected cascade FLOPs.
+  using cascade accuracy and expected cascade MACs.
 - **Independent NAS baseline:** little and big models are searched separately
   and then combined into cascades.
 

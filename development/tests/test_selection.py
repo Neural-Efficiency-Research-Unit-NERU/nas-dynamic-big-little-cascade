@@ -55,11 +55,11 @@ def test_picks_are_contiguous_in_flops():
     ]
     picks = select_knee_neighbors(pareto, k=3)
     flops = [p["cascade_flops"] for p in picks]
-    assert flops == sorted(flops), "picks should be returned sorted by FLOPs"
+    assert flops == sorted(flops), "picks should be returned sorted by MACs"
     sorted_full = sorted([p["cascade_flops"] for p in pareto])
     start = sorted_full.index(flops[0])
     assert sorted_full[start:start + 3] == flops, (
-        "picks should be a contiguous window in the FLOPs-sorted front"
+        "picks should be a contiguous window in the MAC-sorted front"
     )
 
 

@@ -131,7 +131,7 @@ def select_balanced_candidates(
     If the search produced real cascades, choose a diverse set around the useful
     routing region: best accuracy, cheapest near-best, and highest-exit near-best.
     If every candidate is degenerate, fall back to the best proxy-accuracy
-    candidates instead of retraining low-FLOP knee points that are also
+    candidates instead of retraining low-MAC knee points that are also
     degenerate.
     """
     if not candidates:
@@ -180,15 +180,15 @@ def select_balanced_candidates(
 
 def select_knee_neighbors(pareto: list[dict], k: int = 3) -> list[dict]:
     """Pick the knee point of the (cascade_flops, cascade_acc) front plus
-    k - 1 nearest-by-FLOPs neighbours.
+    k - 1 nearest-by-MAC neighbours.
 
     Knee = Pareto point with maximum perpendicular distance to the line
-    connecting the FLOPs-minimum and accuracy-maximum anchors of the
+    connecting the MAC-minimum and accuracy-maximum anchors of the
     normalised front.
 
     Edge cases:
     - Empty front: raises ValueError.
-    - Front with fewer than k points: returns all available, sorted by FLOPs.
+    - Front with fewer than k points: returns all available, sorted by MACs.
     - Knee at an endpoint: window slides toward the interior.
     """
     if not pareto:
@@ -239,7 +239,7 @@ def select_knee_neighbors(pareto: list[dict], k: int = 3) -> list[dict]:
 
 
 def non_dominated_acc_flops(candidates: list[dict]) -> list[dict]:
-    """Return non-dominated candidates for maximize accuracy, minimize FLOPs."""
+    """Return non-dominated candidates for maximize accuracy, minimize MACs."""
     candidates = _dedupe_candidates(candidates)
     survivors = []
     for row in candidates:
@@ -446,13 +446,15 @@ def main():
     )
     parser.add_argument(
         "--allow-big-flops-le-little",
+        "--allow-big-macs-le-little",
         action="store_true",
-        help="Allow selected cascades where big FLOPs are <= little FLOPs.",
+        help="Allow selected cascades where big MACs are <= little MACs.",
     )
     parser.add_argument(
         "--allow-cascade-flops-ge-big",
+        "--allow-cascade-macs-ge-big",
         action="store_true",
-        help="Allow selected cascades where expected cascade FLOPs are >= big-model FLOPs.",
+        help="Allow selected cascades where expected cascade MACs are >= big-model MACs.",
     )
     parser.add_argument(
         "--only-selection-ranks",
@@ -518,7 +520,7 @@ def main():
         )
         picks = select_knee_neighbors(frontier, k=args.top_k)
         candidate_source = f"{source}_frontier"
-        selection_reason = "knee + nearest FLOPs neighbours"
+        selection_reason = "knee + nearest MAC neighbours"
         # Surface degeneracy of the chosen window so a broken search isn't laundered.
         ers = [p.get("exit_ratio") for p in picks]
         if all(er is None for er in ers):
@@ -612,7 +614,7 @@ def main():
         print(
             f"  Pick {idx}: proxy={pick['cascade_acc']:.4f}, "
             f"exit={pick.get('exit_ratio') if pick.get('exit_ratio') is not None else 'NA'}, "
-            f"flops={pick.get('cascade_flops'):.0f}, "
+            f"macs={pick.get('cascade_flops'):.0f}, "
             f"params={pick.get('total_params')}, bytes={pick.get('total_bytes')}"
         )
 
@@ -684,8 +686,8 @@ def main():
             f.write(f"Genotype: {genotype.to_dict()}\n")
             f.write(f"Parameters: {n_params:,}\n")
             f.write(f"Memory: {memory['total_bytes']:,} bytes\n")
-            f.write(f"Little FLOPs: {flops['little_flops']:,}\n")
-            f.write(f"Big FLOPs: {flops['big_flops']:,}\n")
+            f.write(f"Little MACs: {flops['little_flops']:,}\n")
+            f.write(f"Big MACs: {flops['big_flops']:,}\n")
             f.write(f"Proxy cascade acc: {entry['cascade_acc']:.4f}\n")
             f.write(f"Best val cascade acc: {result['best_cascade_acc']:.4f}\n")
             if learned_T is not None:
@@ -696,7 +698,7 @@ def main():
                 cflops = cascade_flops(flops["little_flops"], flops["big_flops"], r["exit_ratio"])
                 f.write(
                     f"  t={t:.2f}  cascade_acc={r['cascade_acc']:.4f}  "
-                    f"exit={r['exit_ratio']:.2f}  cascade_flops={cflops:,.0f}  "
+                    f"exit={r['exit_ratio']:.2f}  cascade_macs={cflops:,.0f}  "
                     f"ECE={r['little_ece']:.4f}  routing_err={r['routing_error_rate']:.4f}\n"
                 )
 
@@ -706,7 +708,7 @@ def main():
             cflops = cascade_flops(flops["little_flops"], flops["big_flops"], r["exit_ratio"])
             print(
                 f"  t={t:.2f} | Cascade {r['cascade_acc']:.4f} | Exit {r['exit_ratio']:.2f} | "
-                f"Flops {cflops:>10,.0f} | ECE {r['little_ece']:.4f} | "
+                f"MACs {cflops:>10,.0f} | ECE {r['little_ece']:.4f} | "
                 f"RoutErr {r['routing_error_rate']:.4f}"
             )
 

@@ -2,15 +2,15 @@ Model: NAS Architecture 2
 Genotype: {'little': [{'channels': 16, 'layers': 1, 'kernel_size': 5, 'conv_type': 'depthwise_separable', 'use_residual': False}, {'channels': 8, 'layers': 1, 'kernel_size': 5, 'conv_type': 'depthwise_separable', 'use_residual': True}, {'channels': 24, 'layers': 2, 'kernel_size': 5, 'conv_type': 'standard', 'use_residual': False}], 'big': [{'channels': 64, 'layers': 1, 'kernel_size': 5, 'conv_type': 'standard', 'use_residual': True}, {'channels': 64, 'layers': 2, 'kernel_size': 5, 'conv_type': 'depthwise_separable', 'use_residual': False}, {'channels': 24, 'layers': 1, 'kernel_size': 5, 'conv_type': 'standard', 'use_residual': False}, {'channels': 64, 'layers': 1, 'kernel_size': 3, 'conv_type': 'depthwise_separable', 'use_residual': False}], 'threshold': 0.7}
 Parameters: 78,605
 Memory: 392,244 bytes
-Little FLOPs: 380,912
-Big FLOPs: 2,629,088
+Little MACs: 380,912
+Big MACs: 2,629,088
 Proxy cascade acc: 0.6390
 Best val cascade acc: 0.8238
 
 Threshold sweep (test set, T=1.0):
-  t=0.50  cascade_acc=0.7750  exit=0.76  cascade_flops=1,003,480  ECE=0.0058  routing_err=0.0768
-  t=0.60  cascade_acc=0.7975  exit=0.64  cascade_flops=1,314,764  ECE=0.0058  routing_err=0.0452
-  t=0.70  cascade_acc=0.8101  exit=0.54  cascade_flops=1,598,443  ECE=0.0058  routing_err=0.0253
-  t=0.80  cascade_acc=0.8182  exit=0.43  cascade_flops=1,876,074  ECE=0.0058  routing_err=0.0122
-  t=0.90  cascade_acc=0.8207  exit=0.30  cascade_flops=2,231,264  ECE=0.0058  routing_err=0.0035
-  t=0.95  cascade_acc=0.8212  exit=0.21  cascade_flops=2,464,464  ECE=0.0058  routing_err=0.0011
+  t=0.50  cascade_acc=0.7750  exit=0.76  cascade_macs=1,003,480  ECE=0.0058  routing_err=0.0768
+  t=0.60  cascade_acc=0.7975  exit=0.64  cascade_macs=1,314,764  ECE=0.0058  routing_err=0.0452
+  t=0.70  cascade_acc=0.8101  exit=0.54  cascade_macs=1,598,443  ECE=0.0058  routing_err=0.0253
+  t=0.80  cascade_acc=0.8182  exit=0.43  cascade_macs=1,876,074  ECE=0.0058  routing_err=0.0122
+  t=0.90  cascade_acc=0.8207  exit=0.30  cascade_macs=2,231,264  ECE=0.0058  routing_err=0.0035
+  t=0.95  cascade_acc=0.8212  exit=0.21  cascade_macs=2,464,464  ECE=0.0058  routing_err=0.0011

@@ -776,7 +776,7 @@ def evaluate_combined_cascades(
     RQ1 plots compare independent and joint NAS on the same split.
 
     Records the same Meeting-4 metric set as the joint NAS path so RQ1 plots
-    can compare on the same axes (avg cascade FLOPs vs cascade accuracy).
+    can compare on the same axes (avg cascade MACs vs cascade accuracy).
     """
     results_path = experiment_dir / results_filename
     metadata_columns: list[str] = []
@@ -847,7 +847,7 @@ def evaluate_combined_cascades(
         big_params = count_parameters(big_model)
         total_params = little_params + big_params
 
-        # Analytical FLOPs and memory bytes (consistent with joint NAS reporting)
+        # Analytical MACs and memory bytes (consistent with joint NAS reporting)
         little_flops = _estimate_path_flops(genotype.little_blocks, INPUT_CHANNELS)
         big_flops = _estimate_path_flops(genotype.big_blocks, INPUT_CHANNELS)
         l_w, l_p = _estimate_path_memory(genotype.little_blocks, INPUT_CHANNELS)
@@ -870,7 +870,7 @@ def evaluate_combined_cascades(
                 f"  Genotype {gid} | Thr {threshold:.2f} | "
                 f"Cascade {metrics['cascade_acc']:.4f} | Exit {metrics['exit_ratio']:.2f} | "
                 f"Little {little_acc:.4f} | Big {big_acc:.4f} | "
-                f"Flops {cflops:>10,.0f} | Bytes {total_bytes:>7,} | "
+                f"MACs {cflops:>10,.0f} | Bytes {total_bytes:>7,} | "
                 f"ECE {metrics['little_ece']:.4f} | RoutErr {metrics['routing_error_rate']:.4f}"
             )
             with open(results_path, "a", newline="") as f:

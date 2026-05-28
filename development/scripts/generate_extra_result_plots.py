@@ -483,9 +483,9 @@ def plot_ablation_acc_flops(variant_rows: dict[str, list[dict]], output_dir: Pat
         all_acc.append(acc)
         ax.scatter(flops, acc, marker="o", s=80, color=color, label=f"{key}: {label}")
         ax.annotate(key, (flops, acc), xytext=(5, 5), textcoords="offset points", fontsize=8)
-    ax.set_xlabel("Mean Cascade FLOPs (M MACs)")
+    ax.set_xlabel("Mean Cascade MACs (M MACs)")
     ax.set_ylabel("Mean Cascade Accuracy (%)")
-    ax.set_title("Ablation Accuracy vs FLOPs at Threshold 0.70")
+    ax.set_title("Ablation Accuracy vs MACs at Threshold 0.70")
     _zoom_axis_to_data(ax, all_flops, all_acc)
     ax.grid(alpha=0.25)
     ax.legend(fontsize=8)
@@ -717,7 +717,7 @@ def _select_knee_unique(rows: list[dict], k: int = 3) -> list[dict]:
 
 
 def _non_dominated_acc_flops(rows: list[dict]) -> list[dict]:
-    """Return non-dominated rows for maximize accuracy, minimize FLOPs."""
+    """Return non-dominated rows for maximize accuracy, minimize MACs."""
     survivors = []
     for row in rows:
         dominated = False
@@ -739,8 +739,19 @@ def _non_dominated_acc_flops(rows: list[dict]) -> list[dict]:
     return sorted(survivors, key=lambda r: r["cascade_flops"])
 
 
+def _is_compute_saving_feasible(row: dict) -> bool:
+    """Feasible for selected cascade plots, beyond the hard NAS constraints."""
+    required = ["little_flops", "big_flops", "cascade_flops", "cascade_acc"]
+    if any(not isinstance(row.get(key), float) for key in required):
+        return False
+    return (
+        row["big_flops"] > row["little_flops"]
+        and row["cascade_flops"] < row["big_flops"]
+    )
+
+
 def plot_proxy_unique_knee_selection(exp_base: Path, output_dir: Path) -> None:
-    """Plot proxy Pareto frontier with the duplicate-safe knee selection."""
+    """Plot feasible proxy Pareto frontier with selected joint architectures."""
     search_dir = exp_base / "cifar10_cosearch_nas"
     search_path = search_dir / "search_log.csv"
     if not search_path.exists():
@@ -754,28 +765,28 @@ def plot_proxy_unique_knee_selection(exp_base: Path, output_dir: Path) -> None:
     if not rows:
         return
 
-    selection_pool = [
-        r for r in rows
-        if isinstance(r.get("little_flops"), float)
-        and isinstance(r.get("big_flops"), float)
-        and r["big_flops"] > r["little_flops"]
-        and r["cascade_flops"] < r["big_flops"]
-    ]
-    if not selection_pool:
+    feasible_rows = [r for r in rows if _is_compute_saving_feasible(r)]
+    if not feasible_rows:
         return
 
-    frontier = _non_dominated_acc_flops(rows)
-    selection_frontier = _non_dominated_acc_flops(selection_pool)
-    selected = _select_knee_unique(selection_frontier, k=3)
+    frontier = _non_dominated_acc_flops(feasible_rows)
+    selected_path = search_dir / "selected_architectures.csv"
+    selected = [
+        r for r in (_read_csv(selected_path) if selected_path.exists() else [])
+        if _is_compute_saving_feasible(r)
+    ]
+    if not selected:
+        selected = _select_knee_unique(frontier, k=3)
+    selected = sorted(selected, key=lambda r: r["cascade_flops"])
 
     fig, ax = plt.subplots(figsize=(8.5, 5.3))
     ax.scatter(
-        [r["cascade_flops"] / 1e6 for r in rows],
-        [r["cascade_acc"] * 100 for r in rows],
+        [r["cascade_flops"] / 1e6 for r in feasible_rows],
+        [r["cascade_acc"] * 100 for r in feasible_rows],
         s=24,
         alpha=0.45,
         color="lightgray",
-        label="All proxy-trained candidates",
+        label="Feasible proxy-trained candidates",
         zorder=1,
     )
     ax.plot(
@@ -785,7 +796,7 @@ def plot_proxy_unique_knee_selection(exp_base: Path, output_dir: Path) -> None:
         marker="o",
         linewidth=1.7,
         markersize=5,
-        label="Pareto frontier over all candidates",
+        label="Feasible Pareto frontier",
         zorder=3,
     )
     ax.scatter(
@@ -796,17 +807,24 @@ def plot_proxy_unique_knee_selection(exp_base: Path, output_dir: Path) -> None:
         color="gold",
         edgecolor="black",
         linewidth=0.9,
-        label="Knee selection with cascade FLOPs < big FLOPs",
+        label="Selected for retraining",
         zorder=5,
     )
+    label_offsets = {
+        1: (8, 8, "left"),
+        2: (-8, 18, "right"),
+        3: (8, 26, "left"),
+    }
     for rank, row in enumerate(selected, start=1):
+        dx, dy, ha = label_offsets.get(rank, (6, 6, "left"))
         ax.annotate(
             f"A{rank}\nexit={row['exit_ratio']:.2f}",
             xy=(row["cascade_flops"] / 1e6, row["cascade_acc"] * 100),
-            xytext=(6, 6),
+            xytext=(dx, dy),
             textcoords="offset points",
             fontsize=8,
             fontweight="bold",
+            ha=ha,
             bbox={
                 "boxstyle": "round,pad=0.18",
                 "facecolor": "white",
@@ -817,21 +835,26 @@ def plot_proxy_unique_knee_selection(exp_base: Path, output_dir: Path) -> None:
             zorder=6,
         )
 
-    ax.set_xlabel("Average Cascade FLOPs (M MACs)")
+    ax.set_xlabel("Average Cascade MACs (M MACs)")
     ax.set_ylabel("Proxy Cascade Accuracy (%)")
-    ax.set_title("Proxy Pareto Frontier with Compute-Saving Knee Selection")
+    ax.set_title("Feasible Proxy Pareto Frontier with Selected Architectures")
     ax.grid(alpha=0.25)
     ax.legend(loc="lower right")
     _save(fig, output_dir / "search", "proxy_pareto_frontier_knee_unique_selected")
 
-    print("Compute-saving knee selected architectures:")
+    print(
+        "Feasible proxy Pareto plot: "
+        f"{len(feasible_rows)}/{len(rows)} candidates shown, "
+        f"{len(frontier)} on the feasible frontier"
+    )
+    print("Selected architectures:")
     for rank, row in enumerate(selected, start=1):
         print(
             f"  A{rank}: acc={row['cascade_acc']:.4f}, "
             f"exit={row['exit_ratio']:.4f}, "
-            f"flops={row['cascade_flops']:.0f}, "
-            f"little_flops={row['little_flops']:.0f}, "
-            f"big_flops={row['big_flops']:.0f}, "
+            f"macs={row['cascade_flops']:.0f}, "
+            f"little_macs={row['little_flops']:.0f}, "
+            f"big_macs={row['big_flops']:.0f}, "
             f"params={row.get('total_params', '')}"
         )
 
@@ -888,7 +911,7 @@ def plot_joint_independent_params(exp_base: Path, output_dir: Path) -> None:
         [r["cascade_acc"] * 100 for r in independent_best],
         s=55, color=INDEPENDENT_COLOR, label="Independent NAS", marker="s", edgecolor="black", linewidth=0.4,
     )
-    axes[1].set_xlabel("Cascade FLOPs at Threshold 0.70 (M MACs)")
+    axes[1].set_xlabel("Cascade MACs at Threshold 0.70 (M MACs)")
     axes[1].set_ylabel("Cascade Accuracy (%)")
     axes[1].set_title("Accuracy vs Compute at Threshold 0.70")
     _zoom_axis_to_data(axes[1], flops_x, flops_y)
@@ -945,7 +968,7 @@ def plot_c1_vs_independent_acc_flops(exp_base: Path, output_dir: Path) -> None:
             fontweight="bold",
         )
 
-    ax.set_xlabel("Average Cascade FLOPs at Threshold 0.70 (M MACs)")
+    ax.set_xlabel("Average Cascade MACs at Threshold 0.70 (M MACs)")
     ax.set_ylabel("Cascade Accuracy (%)")
     ax.set_title("Fully Trained C1 Co-search vs Independent NAS")
     _zoom_axis_to_data(ax, all_flops, all_acc)
@@ -1015,7 +1038,7 @@ def plot_c1_vs_independent_best_threshold(exp_base: Path, output_dir: Path) -> N
             fontsize=7,
         )
 
-    ax.set_xlabel("Average Cascade FLOPs (M MACs)")
+    ax.set_xlabel("Average Cascade MACs (M MACs)")
     ax.set_ylabel("Cascade Accuracy (%)")
     ax.set_title("C1 Co-search vs Independent NAS with Best Independent Threshold")
     _zoom_axis_to_data(ax, all_flops, all_acc)
@@ -1065,13 +1088,13 @@ def _plot_flops_breakdown(
     cascade = [r["cascade_flops"] / 1e6 for r in rows]
 
     fig, ax = plt.subplots(figsize=(max(8, len(rows) * 1.2), 5))
-    little_bars = ax.bar(x - width, little, width, label="Little FLOPs", color="#4C78A8")
-    big_bars = ax.bar(x, big, width, label="Big FLOPs", color="#F58518")
-    cascade_bars = ax.bar(x + width, cascade, width, label="Cascade FLOPs", color="#54A24B")
+    little_bars = ax.bar(x - width, little, width, label="Little MACs", color="#4C78A8")
+    big_bars = ax.bar(x, big, width, label="Big MACs", color="#F58518")
+    cascade_bars = ax.bar(x + width, cascade, width, label="Cascade MACs", color="#54A24B")
 
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=30, ha="right")
-    ax.set_ylabel("FLOPs (M MACs)")
+    ax.set_ylabel("MACs (M MACs)")
     ax.set_title(title)
     if zoom_y:
         values = little + big + cascade
@@ -1111,7 +1134,7 @@ def _plot_flops_breakdown(
 
 
 def plot_flops_breakdowns(exp_base: Path, output_dir: Path) -> None:
-    """Plot little, big, and expected cascade FLOPs.
+    """Plot little, big, and expected cascade MACs.
 
     Joint uses the C3 cascade-aware-loss sweeps at threshold 0.70. Independent
     uses the five most accurate genotypes at threshold 0.70 to keep the chart
@@ -1133,7 +1156,7 @@ def plot_flops_breakdowns(exp_base: Path, output_dir: Path) -> None:
         _plot_flops_breakdown(
             joint_rows,
             joint_labels,
-            "Joint C3 FLOPs Breakdown at Threshold 0.70",
+            "Joint C3 MACs Breakdown at Threshold 0.70",
             output_dir / "flops",
             "flops_breakdown_joint_c3_t070",
         )
@@ -1153,14 +1176,14 @@ def plot_flops_breakdowns(exp_base: Path, output_dir: Path) -> None:
             _plot_flops_breakdown(
                 independent_rows,
                 [f"Ind {int(r['genotype_id'])}" for r in independent_rows],
-                "Top Independent FLOPs Breakdown at Threshold 0.70",
+                "Top Independent MACs Breakdown at Threshold 0.70",
                 output_dir / "flops",
                 "flops_breakdown_independent_top5_t070",
             )
 
 
 def plot_ablation_flops_breakdown(variant_rows: dict[str, list[dict]], output_dir: Path) -> None:
-    """Plot mean little, big, and cascade FLOPs for C1-C4 at threshold 0.70."""
+    """Plot mean little, big, and cascade MACs for C1-C4 at threshold 0.70."""
     rows = []
     labels = []
     for key, variant_data in variant_rows.items():
@@ -1178,7 +1201,7 @@ def plot_ablation_flops_breakdown(variant_rows: dict[str, list[dict]], output_di
         _plot_flops_breakdown(
             rows,
             labels,
-            "C1-C4 Mean FLOPs Breakdown at Threshold 0.70",
+            "C1-C4 Mean MACs Breakdown at Threshold 0.70",
             output_dir / "flops",
             "flops_breakdown_ablation_c1_c4_t070",
             zoom_y=True,

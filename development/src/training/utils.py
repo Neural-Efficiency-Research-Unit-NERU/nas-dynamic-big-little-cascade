@@ -233,7 +233,7 @@ def _estimate_path_flops(
 
 
 def estimate_pair_flops(genotype, num_classes: int = 10) -> dict:
-    """Analytically estimate FLOPs (MACs) for a CascadePair."""
+    """Analytically estimate MACs for a CascadePair."""
     from src.nas.search_space import INPUT_CHANNELS
 
     little_flops = _estimate_path_flops(
@@ -251,7 +251,7 @@ def estimate_pair_flops(genotype, num_classes: int = 10) -> dict:
 
 
 def cascade_flops(little_flops: int, big_flops: int, exit_ratio: float) -> float:
-    """Expected FLOPs for cascade inference.
+    """Expected MACs for cascade inference.
 
     All samples run little model. (1 - exit_ratio) fraction also runs big model.
     """
